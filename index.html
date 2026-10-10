@@ -906,7 +906,8 @@ function buildWorld(seed, worldOverride) {
   terrainMesh = new THREE.Mesh(geo, mat);
   worldGroup.add(terrainMesh);
 
-  // road ribbon
+  // road ribbon (procedural maps only — real terrain uses OSM roads or none)
+  if (!world.real) {
   {
     const vp = [], idx = [];
     let i = 0;
@@ -922,6 +923,31 @@ function buildWorld(seed, worldOverride) {
     rg.setAttribute('position', new THREE.Float32BufferAttribute(vp, 3));
     rg.setIndex(idx); rg.computeVertexNormals();
     worldGroup.add(new THREE.Mesh(rg, new THREE.MeshLambertMaterial({ color: 0x2e2c28, polygonOffset: true, polygonOffsetFactor: -2 })));
+  }
+  }
+  // real OSM roads (if fetched)
+  if (world.roads && world.roads.length) {
+    const roadMat = new THREE.MeshLambertMaterial({ color: 0x2e2c28, polygonOffset: true, polygonOffsetFactor: -2 });
+    for (const road of world.roads) {
+      const pts = road.pts, w = road.w / 2;
+      if (pts.length < 2) continue;
+      const vp = [], idx = [];
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const q = pts[Math.min(pts.length - 1, i + 1)], o = pts[Math.max(0, i - 1)];
+        let dx = q.x - o.x, dz = q.z - o.z;
+        const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
+        const nx = -dz * w, nz2 = dx * w;
+        const h1 = sampleH(H, GRID, SIZE, p.x + nx, p.z + nz2) + 0.4;
+        const h2 = sampleH(H, GRID, SIZE, p.x - nx, p.z - nz2) + 0.4;
+        vp.push(p.x + nx, h1, p.z + nz2, p.x - nx, h2, p.z - nz2);
+        if (i > 0) { const b = i * 2; idx.push(b - 2, b - 1, b, b - 1, b + 1, b); }
+      }
+      const rg = new THREE.BufferGeometry();
+      rg.setAttribute('position', new THREE.Float32BufferAttribute(vp, 3));
+      rg.setIndex(idx); rg.computeVertexNormals();
+      worldGroup.add(new THREE.Mesh(rg, roadMat));
+    }
   }
 
   // buildings
@@ -1933,6 +1959,33 @@ async function pkFetchTexture(lat, lon, onProgress) {
   }
   return canvas;
 }
+// Fetch real roads from OpenStreetMap (Overpass) for the 3x3 mile box.
+async function pkFetchRoads(lat, lon, onProgress) {
+  const SIZE_M = 4828;
+  const mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
+  const dLat = (SIZE_M / 2) / mPerDegLat, dLon = (SIZE_M / 2) / mPerDegLon;
+  const south = lat - dLat, north = lat + dLat, west = lon - dLon, east = lon + dLon;
+  onProgress('fetching roads…');
+  const q = `[out:json][timeout:25];(way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$"](${south},${west},${north},${east}););out geom;`;
+  const r = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST', body: 'data=' + encodeURIComponent(q),
+  });
+  if (!r.ok) throw new Error('roads fetch failed');
+  const j = await r.json();
+  const widthFor = (t) => t === 'motorway' ? 14 : t === 'trunk' ? 11 : t === 'primary' ? 9 : t === 'secondary' ? 8 : 6;
+  const roads = [];
+  for (const el of j.elements || []) {
+    if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
+    const pts = el.geometry.map(p => ({
+      // lat/lon -> game x/z (x east, z south, origin at bbox center-northwest)
+      x: (p.lon - (west + east) / 2) * mPerDegLon + SIZE_M / 2,
+      z: ((north + south) / 2 - p.lat) * mPerDegLat + SIZE_M / 2,
+    }));
+    roads.push({ pts, w: widthFor(el.tags.highway) });
+  }
+  onProgress(`found ${roads.length} roads`);
+  return roads;
+}
 async function pkGenerate() {
   const lat = PK.selLat !== null ? PK.selLat : PK.lat;
   const lon = PK.selLon !== null ? PK.selLon : PK.lon;
@@ -1943,10 +1996,14 @@ async function pkGenerate() {
     const heights = await pkFetchElevation(lat, lon, pkStatus);
     let texCanvas = null;
     if (useTex) texCanvas = await pkFetchTexture(lat, lon, pkStatus);
+    let roads = [];
+    try { roads = await pkFetchRoads(lat, lon, pkStatus); }
+    catch (e) { pkStatus('roads unavailable, continuing…'); }
     pkStatus('building map…');
     await new Promise(r => setTimeout(r, 30));
     const label = `real terrain ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     const world = generateRealMap(heights, (Math.random() * 1e9) | 0, label);
+    world.roads = roads;
     if (useTex) {
       world.groundTexture = texCanvas;
       world.noForest = true;
