@@ -5,7 +5,7 @@
 'use strict';
 
 const W = {
-  seed: 20261010,
+  seed: (Math.random() * 1e9) | 0,
   world: null, buildings: [], people: [], treeGrid: null,
   covAcc: null,                 // union of all repeater sweeps
   repeaters: [],
@@ -972,6 +972,7 @@ function tick(t) {
 
   stepPlayer(dt); // movement, collision, eye height, camera pose
   stepReveal(dt);
+  if (W.sky) W.sky.position.copy(camera.position); // sky dome follows the eye
 
   // life: beacons, rings, waypoint bob
   for (const g of repeaterGroups) {
