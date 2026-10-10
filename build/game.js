@@ -1069,6 +1069,14 @@ function pkInit() {
   document.getElementById('pk-cancel').onclick = () => {
     document.getElementById('pickdlg').classList.add('hidden');
   };
+  document.getElementById('pk-zin').onclick = (e) => {
+    e.stopPropagation();
+    PK.zoom = Math.min(15, PK.zoom + 1); pkRender();
+  };
+  document.getElementById('pk-zout').onclick = (e) => {
+    e.stopPropagation();
+    PK.zoom = Math.max(8, PK.zoom - 1); pkRender();
+  };
   document.getElementById('pk-generate').onclick = pkGenerate;
 }
 function pkStatus(t) { document.getElementById('pk-status').textContent = t; }
