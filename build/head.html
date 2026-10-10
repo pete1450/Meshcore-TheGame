@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>MeshCore Signal Map — FPV</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#0b0e12;
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#e8ecf1;
+    -webkit-user-select:none;user-select:none;}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;}
+  .panel{position:fixed;z-index:10;background:rgba(12,16,22,.82);border:1px solid #2a3340;
+    border-radius:10px;padding:10px 12px;backdrop-filter:blur(4px);}
+  #hud{top:10px;left:10px;max-width:min(330px,70vw);}
+  #hud h1{margin:0 0 2px;font-size:15px;letter-spacing:.12em;color:#ffd75e;}
+  #hud .sub{font-size:11px;color:#9fb0c3;margin-bottom:8px;}
+  #hud .row{font-size:12.5px;margin:3px 0;}
+  #hud .row b{color:#fff;}
+  #ctl{top:10px;right:10px;display:flex;flex-direction:column;gap:8px;}
+  button{font:600 14px system-ui;letter-spacing:.04em;color:#0b0e12;background:#ffd75e;border:0;
+    border-radius:8px;padding:10px 16px;cursor:pointer;}
+  button.ghost{background:#2a3340;color:#e8ecf1;}
+  #mast{bottom:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;
+    z-index:10;position:fixed;background:rgba(12,16,22,.82);border:1px solid #2a3340;border-radius:10px;
+    padding:10px 14px;backdrop-filter:blur(4px);width:min(480px,72vw);}
+  #mast label{font-size:12px;color:#9fb0c3;white-space:nowrap;}
+  #mast input{flex:1;accent-color:#ffd75e;}
+  #antval{font-size:13px;color:#fff;min-width:44px;text-align:right;}
+  #cross{position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;
+    background:rgba(255,255,255,.85);z-index:5;pointer-events:none;}
+  #toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%);z-index:25;display:none;
+    background:rgba(12,16,22,.92);border:1px solid #2a3340;border-radius:8px;
+    padding:8px 16px;font-size:13px;color:#ffd75e;white-space:nowrap;}
+  /* minimap: small bottom-right, grows to near-fullscreen */
+  #minimap{position:fixed;z-index:20;right:12px;bottom:12px;width:190px;height:190px;
+    border:2px solid #2a3340;border-radius:10px;overflow:hidden;background:#0b0e12;cursor:pointer;
+    transition:width .45s cubic-bezier(.2,.9,.25,1.12),height .45s cubic-bezier(.2,.9,.25,1.12),
+      right .45s cubic-bezier(.2,.9,.25,1.12),bottom .45s cubic-bezier(.2,.9,.25,1.12),
+      transform .45s cubic-bezier(.2,.9,.25,1.12),border-color .3s;}
+  #minimap.expanded{right:50%;bottom:50%;transform:translate(50%,50%);
+    width:min(88vmin,92vw);height:min(88vmin,92vw);border-color:#ffd75e;cursor:crosshair;}
+  #minimap canvas{width:100%;height:100%;display:block;}
+  #minimap .cap{position:absolute;left:0;right:0;bottom:0;text-align:center;font-size:12px;
+    color:#ffd75e;background:rgba(12,16,22,.75);padding:6px;display:none;}
+  #minimap.expanded .cap{display:block;}
+  #minimap .tag{position:absolute;top:4px;left:8px;font-size:11px;letter-spacing:.1em;color:#9fb0c3;
+    background:rgba(12,16,22,.7);padding:2px 6px;border-radius:4px;}
+  /* help overlay */
+  #help{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;
+    background:rgba(5,8,12,.72);cursor:pointer;}
+  #help.hidden{display:none;}
+  #help .card{background:#141a23;border:1px solid #2a3340;border-radius:14px;padding:26px 30px;
+    max-width:min(440px,88vw);text-align:center;}
+  #help h2{margin:0 0 6px;color:#ffd75e;letter-spacing:.1em;font-size:18px;}
+  #help p{font-size:13.5px;color:#c7d2e0;line-height:1.65;margin:8px 0;}
+  #help kbd{background:#2a3340;border-radius:4px;padding:1px 7px;font:600 12px system-ui;color:#fff;}
+  /* touch controls */
+  #joy{position:fixed;left:18px;bottom:70px;width:110px;height:110px;border-radius:50%;z-index:15;
+    border:2px solid rgba(255,255,255,.25);background:rgba(20,26,35,.35);display:none;}
+  #joyknob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px;border-radius:50%;
+    background:rgba(255,215,94,.55);}
+  #touchbtns{position:fixed;right:16px;bottom:220px;z-index:15;display:none;flex-direction:column;gap:10px;}
+  #touchbtns button{width:64px;height:64px;border-radius:50%;padding:0;font-size:13px;}
+  body.touch #joy{display:block;}
+  body.touch #touchbtns{display:flex;}
+  body.touch #mast{display:none;}
+  /* simulated MeshCore handheld: chunky radio body + LCD screen */
+  #devbtn{position:fixed;left:12px;bottom:12px;z-index:22;width:52px;height:52px;border-radius:50%;
+    background:#1b2534;border:2px solid #2a3340;font-size:24px;cursor:pointer;display:flex;
+    align-items:center;justify-content:center;}
+  #devbtn:hover{border-color:#ffd75e;}
+  #device{position:fixed;left:12px;bottom:76px;z-index:22;width:332px;max-width:88vw;
+    background:linear-gradient(165deg,#262a31,#14161a);border:1px solid #3a4049;border-radius:24px;
+    padding:16px 14px 14px;box-shadow:0 20px 44px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.09);
+    transform:translateY(70px) rotate(-4deg) scale(.9);opacity:0;pointer-events:none;
+    transition:transform .38s cubic-bezier(.2,.9,.25,1.18),opacity .25s;}
+  #device.open{transform:none;opacity:1;pointer-events:auto;}
+  .dev-ant{position:absolute;top:-46px;right:34px;width:15px;height:52px;border-radius:8px;
+    background:linear-gradient(90deg,#0a0b0d,#23262c,#0a0b0d);box-shadow:0 2px 4px rgba(0,0,0,.5);}
+  .dev-ant::after{content:"";position:absolute;top:-7px;left:2px;width:11px;height:11px;border-radius:50%;background:#0a0b0d;}
+  .dev-screen{position:relative;background:#a3ad6f;border-radius:8px;overflow:hidden;
+    box-shadow:inset 0 2px 10px rgba(0,0,0,.45),inset 0 0 2px rgba(0,0,0,.6);
+    font-family:ui-monospace,'Courier New',monospace;color:#181a0e;}
+  .dev-screen .scanlines{position:absolute;inset:0;pointer-events:none;z-index:5;
+    background:repeating-linear-gradient(0deg,rgba(0,0,0,.07) 0 1px,transparent 1px 3px);}
+  #device .dhead{display:flex;justify-content:space-between;align-items:center;
+    padding:8px 10px;font-size:12.5px;letter-spacing:.06em;font-weight:700;
+    border-bottom:2px solid rgba(24,26,14,.55);}
+  #device .dhead #mynode{font-weight:400;}
+  #devx{cursor:pointer;font-size:17px;padding:0 4px;}
+  #device .dtabs{display:flex;border-bottom:2px solid rgba(24,26,14,.55);}
+  #device .dtabs button{flex:1;background:none;border:0;border-radius:0;color:#3c3f28;
+    padding:8px;font-size:12px;letter-spacing:.1em;cursor:pointer;font-family:inherit;font-weight:700;}
+  #device .dtabs button.on{color:#101208;background:rgba(24,26,14,.18);
+    box-shadow:inset 0 -3px 0 #101208;}
+  #pane-rep,#pane-ch{padding:9px 10px;height:296px;overflow-y:auto;}
+  #dscan{width:100%;margin-bottom:8px;background:#181a0e;color:#c9cf92;border:0;border-radius:6px;
+    padding:9px;font-family:inherit;font-weight:700;letter-spacing:.12em;cursor:pointer;font-size:12.5px;}
+  #dscan:active{transform:translateY(1px);}
+  .rep{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:6px 2px;
+    border-bottom:1px dashed rgba(24,26,14,.4);}
+  .rep .rname{font-weight:700;min-width:28px;}
+  .rep .rhash{opacity:.75;}
+  .rep .rsig{margin-left:auto;letter-spacing:1px;}
+  .rep .rago{font-size:11px;min-width:52px;text-align:right;opacity:.7;}
+  .rempty{font-size:12px;padding:8px 2px;opacity:.7;}
+  #msgs{display:flex;flex-direction:column;gap:6px;max-height:208px;overflow-y:auto;margin-bottom:8px;}
+  .msg{font-size:12.5px;border:1px solid rgba(24,26,14,.4);border-radius:6px;padding:6px 8px;line-height:1.4;
+    background:rgba(255,255,255,.08);}
+  .msg .who{font-weight:700;margin-right:7px;font-size:11px;}
+  .msg .ts{font-size:10px;float:right;margin-left:8px;opacity:.6;}
+  .msg.me{background:rgba(24,26,14,.22);}
+  .msg.sys{font-style:italic;background:none;border:0;padding:2px 4px;opacity:.75;}
+  .drow{display:flex;gap:6px;}
+  #msgin{flex:1;background:rgba(255,255,255,.14);border:1px solid rgba(24,26,14,.5);border-radius:6px;
+    color:#101208;padding:8px;font-size:12.5px;outline:none;min-width:0;font-family:inherit;}
+  #msgin::placeholder{color:rgba(24,26,14,.5);}
+  #send{padding:8px 12px;background:#181a0e;color:#c9cf92;border:0;border-radius:6px;
+    font-family:inherit;font-weight:700;cursor:pointer;}
+  .dev-keys{display:flex;gap:10px;justify-content:center;margin-top:12px;}
+  .dev-keys button{border:1px solid #3a4049;cursor:pointer;color:#cfd6e2;font-family:inherit;}
+  #ppwr{width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3a2a2a,#1c1214);
+    font-size:18px;}
+  #ppscan{flex:1;max-width:130px;border-radius:12px;background:linear-gradient(180deg,#3d4a2e,#232b1a);
+    color:#d7e08a;font-weight:700;letter-spacing:.14em;font-size:12.5px;padding:12px 0;}
+  #ppscan:active{transform:translateY(1px);}
+  #ppch{width:64px;border-radius:12px;background:linear-gradient(180deg,#333a44,#1d2129);
+    font-weight:700;font-size:12.5px;}
+  .dev-speaker{display:flex;gap:7px;justify-content:center;margin-top:12px;}
+  .dev-speaker i{width:7px;height:7px;border-radius:50%;background:#0a0b0d;box-shadow:inset 0 1px 2px #000;}
+  @media (max-width:700px){ #hud{max-width:58vw;} #hud .sub{display:none;} }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+<div id="toast"></div>
+<div id="devbtn" title="MeshCore device (B)">📻</div>
+<div id="device">
+  <div class="dev-ant"></div>
+  <div class="dev-screen">
+    <div class="dhead"><span>MESHCORE · <span id="mynode">----</span></span><span id="devx">×</span></div>
+    <div class="dtabs"><button id="tab-rep" class="on">RPTRS</button><button id="tab-ch">CHAN</button></div>
+    <div id="pane-rep">
+      <button id="dscan">SCAN</button>
+      <div id="replist"><div class="rempty">no known repeaters yet — drop one with E, then scan</div></div>
+    </div>
+    <div id="pane-ch" style="display:none">
+      <div id="msgs"></div>
+      <div class="drow"><input id="msgin" placeholder="public channel…" maxlength="120" autocomplete="off"><button id="send">TX</button></div>
+    </div>
+    <div class="scanlines"></div>
+  </div>
+  <div class="dev-keys">
+    <button id="ppwr" title="power / close">⏻</button>
+    <button id="ppscan" title="scan for repeaters">SCAN</button>
+    <button id="ppch" title="channel tab">CH</button>
+  </div>
+  <div class="dev-speaker"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+</div>
+<div class="panel" id="hud">
+  <h1>MESHCORE FPV</h1>
+  <div class="sub">walk the land · drop repeaters · link everyone</div>
+  <div class="row">Coverage: <b id="st-cov">—</b></div>
+  <div class="row">Scan: <b id="st-scan">—</b></div>
+  <div class="row">People: <b id="st-reach">—</b></div>
+  <div class="row">Repeaters: <b id="st-rep">0</b></div>
+  <div class="row" id="st-people" style="color:#ffd75e"></div>
+</div>
+<div class="panel" id="ctl">
+  <button id="drop">drop repeater <span style="opacity:.6">(E)</span></button>
+  <button class="ghost" id="scan">scan here <span style="opacity:.6">(Q)</span></button>
+  <button class="ghost" id="mapbtn">map <span style="opacity:.6">(M)</span></button>
+  <button class="ghost" id="newmap">new map</button>
+</div>
+<div id="mast">
+  <label>REPEATER MAST</label>
+  <input type="range" id="ant" min="2" max="25" step="1" value="10">
+  <span id="antval">10 m</span>
+</div>
+<div id="minimap"><span class="tag">MAP</span><canvas id="mm" width="512" height="512"></canvas>
+  <div class="cap">click to set waypoint · <b>M</b> to close</div></div>
+<div id="joy"><div id="joyknob"></div></div>
+<div id="touchbtns"><button id="tdrop">DROP</button><button id="tmap" class="ghost">MAP</button></div>
+<div id="help"><div class="card">
+  <h2>MESHCORE FPV</h2>
+  <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>shift</kbd> run (10×) · mouse looks around.<br>
+  <kbd>E</kbd> drop a repeater where you stand · <kbd>Q</kbd> scan preview here (orange, stays until next scan).<br>
+  <kbd>M</kbd> grows the map (<kbd>esc</kbd> closes) — click it to set a waypoint.<br>
+  <kbd>B</kbd> opens your 📻 MeshCore device: discover repeaters, chat on the public channel.<br>
+  Link all 12 people. Ridges block, trees weaken, height wins.</p>
+  <p style="color:#ffd75e">click to start walking</p>
+</div></div>
+<script>/*__THREE__*/</script>
+<script>/*__LOGIC__*/</script>
+<script>/*__GAME__*/</script>
+</body>
+</html>
