@@ -25,6 +25,15 @@
   #toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%);z-index:25;display:none;
     background:rgba(12,16,22,.92);border:1px solid #2a3340;border-radius:8px;
     padding:8px 16px;font-size:13px;color:#ffd75e;white-space:nowrap;}
+  /* repeater menu popup */
+  #repmenu{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:28;
+    background:#141a23;border:1px solid #2a3340;border-radius:14px;padding:20px 24px;
+    display:flex;flex-direction:column;gap:10px;align-items:center;min-width:220px;}
+  #repmenu.hidden{display:none;}
+  #repmenu .rm-title{font-size:12px;letter-spacing:.15em;color:#9fb0c3;}
+  #repmenu .rm-id{font:600 22px ui-monospace,monospace;color:#ffd75e;letter-spacing:.1em;}
+  #repmenu button{width:100%;}
+  #rm-delete{background:#5a1f1f;border-color:#8a2a2a;color:#ffb0b0;}
   /* minimap: small bottom-right, grows to near-fullscreen */
   #minimap{position:fixed;z-index:20;right:12px;bottom:12px;width:190px;height:190px;
     border:2px solid #2a3340;border-radius:10px;overflow:hidden;background:#0b0e12;cursor:pointer;
@@ -37,6 +46,9 @@
   #minimap .cap{position:absolute;left:0;right:0;bottom:0;text-align:center;font-size:12px;
     color:#ffd75e;background:rgba(12,16,22,.75);padding:6px;display:none;}
   #minimap.expanded .cap{display:block;}
+  #mapscan{position:absolute;left:50%;transform:translateX(-50%);bottom:34px;display:none;
+    z-index:5;background:#ffd75e;border-color:#ffd75e;color:#141a23;font-weight:700;}
+  #minimap.expanded #mapscan{display:block;}
   #minimap .tag{position:absolute;top:4px;left:8px;font-size:11px;letter-spacing:.1em;color:#9fb0c3;
     background:rgba(12,16,22,.7);padding:2px 6px;border-radius:4px;}
   /* help overlay */
@@ -125,6 +137,12 @@
 <canvas id="c"></canvas>
 <div id="cross"></div>
 <div id="toast"></div>
+<div id="repmenu" class="hidden">
+  <div class="rm-title">REPEATER</div>
+  <div class="rm-id" id="rm-id">····</div>
+  <button id="rm-delete">delete repeater</button>
+  <button id="rm-close" class="ghost">close</button>
+</div>
 <div id="devbtn" title="MeshCore device (B)">📻</div>
 <div id="device">
   <div class="dev-ant"></div>
@@ -159,18 +177,18 @@
 </div>
 <div class="panel" id="ctl">
   <button id="drop">drop repeater <span style="opacity:.6">(E)</span></button>
-  <button class="ghost" id="scan">scan here <span style="opacity:.6">(Q)</span></button>
   <button class="ghost" id="mapbtn">map <span style="opacity:.6">(M)</span></button>
   <button class="ghost" id="newmap">new map</button>
 </div>
 <div id="minimap"><span class="tag">MAP</span><canvas id="mm" width="512" height="512"></canvas>
-  <div class="cap">click to set waypoint · <b>M</b> to close</div></div>
+  <div class="cap">click to set scan target · <b>M</b> to close</div>
+  <button id="mapscan">SCAN</button></div>
 <div id="joy"><div id="joyknob"></div></div>
 <div id="help"><div class="card">
   <h2>MESHCORE FPV</h2>
   <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>shift</kbd> run (10×) · mouse looks around.<br>
-  <kbd>E</kbd> drop a repeater where you stand · <kbd>Q</kbd> scan preview here (orange, stays until next scan).<br>
-  <kbd>M</kbd> grows the map (<kbd>esc</kbd> closes) — click it to set a waypoint.<br>
+  <kbd>E</kbd> drop a repeater where you stand · click a repeater to see its ID / delete it.<br>
+  <kbd>M</kbd> opens the map — click to set a scan target, press SCAN (or <kbd>Q</kbd> for your position).<br>
   <kbd>B</kbd> opens your 📻 MeshCore device: discover repeaters, chat on the public channel.<br>
   Link all 12 people. Ridges block, trees weaken, height wins.</p>
   <p style="color:#ffd75e">click to start walking</p>
@@ -637,13 +655,11 @@ if (typeof module !== 'undefined') {
 const W = {
   seed: (Math.random() * 1e9) | 0,
   world: null, buildings: [], people: [], treeGrid: null,
-  covAcc: null,                 // union of all repeater sweeps
+  scan: null,                   // single map scan {x, z, cov} — one at a time
   repeaters: [],
   player: { x: 512, z: 512, yaw: 0, pitch: 0, eyeY: 60 },
   antH: 2,
-  waypoint: null,
-  preview: null,                // {cov, alpha, t} handheld scan preview
-  revealing: null,              // active sweep-reveal animation
+  waypoint: null,                // scan target set by clicking the map
   floodQueue: [],               // pending simulated mesh messages
   flooding: false,
   keys: {},
@@ -652,10 +668,9 @@ const W = {
 const IS_TOUCH = 'ontouchstart' in window;
 
 let renderer, scene, camera;
-let terrainMesh, covTex, covCanvas, covCtx, covImg;
-let prevTex, prevCanvas, prevCtx;
+let terrainMesh, scanCanvas, scanCtx;
 let worldGroup, personMeshes = [], repeaterGroups = [];
-let sweepLine, sweepRing, waypointMesh;
+let waypointMesh;
 let mmCanvas, mmCtx, mmBase;
 let helpEl, mapEl;
 
@@ -698,18 +713,10 @@ function init() {
   sun.position.set(400, 800, 250);
   scene.add(sun);
 
-  covCanvas = document.createElement('canvas');
-  covCanvas.width = covCanvas.height = SIG.GRID;
-  covCtx = covCanvas.getContext('2d');
-  covImg = covCtx.createImageData(SIG.GRID, SIG.GRID);
-  covTex = new THREE.CanvasTexture(covCanvas);
-  covTex.magFilter = THREE.LinearFilter; covTex.minFilter = THREE.LinearFilter;
-
-  prevCanvas = document.createElement('canvas');
-  prevCanvas.width = prevCanvas.height = SIG.GRID;
-  prevCtx = prevCanvas.getContext('2d');
-  prevTex = new THREE.CanvasTexture(prevCanvas);
-  prevTex.magFilter = THREE.LinearFilter; prevTex.minFilter = THREE.LinearFilter;
+  // single-scan overlay for the map (one scan at a time, map only)
+  scanCanvas = document.createElement('canvas');
+  scanCanvas.width = scanCanvas.height = SIG.GRID;
+  scanCtx = scanCanvas.getContext('2d');
 
   mmCanvas = document.getElementById('mm');
   mmCtx = mmCanvas.getContext('2d');
@@ -747,12 +754,11 @@ function buildWorld(seed) {
   scene.add(worldGroup);
   personMeshes = []; repeaterGroups = [];
   W.repeaters = [];
-  W.covAcc = new Float32Array(SIG.GRID * SIG.GRID);
-  W.preview = null; W.revealing = null; W.waypoint = null;
+  W.scan = null; W.waypoint = null;
   W.floodQueue = []; W.flooding = false;
   if (waypointMesh) { waypointMesh.visible = false; }
-  paintCoverage(covCtx, W.covAcc);
-  prevCtx.clearRect(0, 0, SIG.GRID, SIG.GRID); prevTex.needsUpdate = true;
+  scanCtx.clearRect(0, 0, SIG.GRID, SIG.GRID);
+  hideRepMenu();
   setStat('scan', '—');
 
   const world = generateMap(seed);
@@ -771,15 +777,12 @@ function buildWorld(seed) {
   geo.computeVertexNormals();
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   mat.onBeforeCompile = (sh) => {
-    sh.uniforms.uCov = { value: covTex };
-    sh.uniforms.uPrev = { value: prevTex };
-    sh.uniforms.uPrevA = { value: 0 };
     mat.userData.sh = sh;
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying float vH;\nvarying vec2 vUvC;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvH = position.y;\nvUvC = uv;');
+      .replace('#include <common>', '#include <common>\nvarying float vH;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvH = position.y;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vH;\nvarying vec2 vUvC;\nuniform sampler2D uCov;\nuniform sampler2D uPrev;\nuniform float uPrevA;')
+      .replace('#include <common>', '#include <common>\nvarying float vH;')
       .replace('#include <color_fragment>', `#include <color_fragment>
         vec3 hc = mix(vec3(0.16,0.36,0.15), vec3(0.45,0.40,0.23), smoothstep(120.0, 260.0, vH));
         hc = mix(hc, vec3(0.58,0.57,0.60), smoothstep(260.0, 390.0, vH));
@@ -787,10 +790,6 @@ function buildWorld(seed) {
         float f50 = abs(fract(vH/50.0+0.5)-0.5)*50.0;
         float f250 = abs(fract(vH/250.0+0.5)-0.5)*250.0;
         hc = mix(hc, vec3(0.15,0.12,0.09), clamp((1.0-smoothstep(0.0,4.5,f50))*0.30 + (1.0-smoothstep(0.0,8.0,f250))*0.32, 0.0, 0.55));
-        float pv = texture2D(uPrev, vUvC).r * uPrevA;
-        hc = mix(hc, vec3(1.0,0.55,0.12), clamp(pv*1.8, 0.0, 0.75));
-        float cov = texture2D(uCov, vUvC).r;
-        hc = mix(hc, vec3(1.0,0.10,0.10), clamp(cov*1.6, 0.0, 0.80));
         diffuseColor.rgb = hc;`);
   };
   terrainMesh = new THREE.Mesh(geo, mat);
@@ -922,14 +921,6 @@ function buildWorld(seed) {
     personMeshes.push(g);
   }
 
-  // sweep line + ring (radar reveal)
-  sweepLine = new THREE.Mesh(new THREE.PlaneGeometry(SIG.MAX_RANGE, 2.2),
-    new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthTest: false }));
-  sweepLine.visible = false; worldGroup.add(sweepLine);
-  sweepRing = new THREE.Mesh(new THREE.RingGeometry(0.96, 1.0, 96),
-    new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthTest: false }));
-  sweepRing.rotation.x = -Math.PI / 2; sweepRing.visible = false; worldGroup.add(sweepRing);
-
   // waypoint marker
   waypointMesh = new THREE.Mesh(new THREE.OctahedronGeometry(3),
     new THREE.MeshBasicMaterial({ color: 0x33ddff, transparent: true, opacity: 0.9, depthTest: false }));
@@ -948,9 +939,8 @@ function spawnPlayer() {
   W.player.eyeY = sampleH(W.world.heights, GRID, SIZE, W.player.x, W.player.z) + 1.7;
 }
 
-/* ================= repeaters & sweeps ================= */
+/* ================= repeaters ================= */
 function dropRepeater() {
-  if (W.revealing) return;
   const { SIZE, GRID } = SIG;
   const x = W.player.x, z = W.player.z;
   const gy = sampleH(W.world.heights, GRID, SIZE, x, z);
@@ -963,7 +953,11 @@ function dropRepeater() {
   panel.position.set(2.2, 1.2, 0); panel.rotation.z = -0.5;
   const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.9, 10, 10), new THREE.MeshBasicMaterial({ color: 0x33ff66 }));
   beacon.position.y = W.antH + 0.9;
-  g.add(base, mast, panel, beacon);
+  // generous invisible hitbox so taps land easily
+  const hitbox = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 7, 6),
+    new THREE.MeshBasicMaterial({ visible: false }));
+  hitbox.position.y = 3.5;
+  g.add(base, mast, panel, beacon, hitbox);
   g.position.set(x, gy, z);
   g.userData.beacon = beacon;
   worldGroup.add(g);
@@ -976,109 +970,66 @@ function dropRepeater() {
   };
   g.userData.rep = rep;
   W.repeaters.push(rep);
-  clearPreview(); // a real repeater supersedes the handheld preview
-  rep.cov = revealSweep(x, z, W.antH, false); // keep its own coverage map
+  updateLinked();
   setStat('rep', W.repeaters.length);
-  showToast(`${rep.name} [${rep.hash.slice(0, 4).toUpperCase()}] dropped — open 📻 and scan`);
+  showToast(`${rep.name} [${rep.hash.slice(0, 4).toUpperCase()}] dropped`);
 }
 
-function scanPreview() {
-  if (W.revealing) return;
-  setStat('scan', 'scanning…');
-  revealSweep(W.player.x, W.player.z, 2, true); // handheld height
+// tap-a-repeater menu (ID + delete)
+let menuRep = null;
+const raycaster = new THREE.Raycaster();
+function showRepMenu(rep) {
+  menuRep = rep;
+  document.getElementById('rm-id').textContent =
+    rep.name + ' · ' + rep.hash.slice(0, 4).toUpperCase();
+  document.getElementById('repmenu').classList.remove('hidden');
+}
+function hideRepMenu() {
+  menuRep = null;
+  document.getElementById('repmenu').classList.add('hidden');
+}
+function deleteRepeater(rep) {
+  const g = rep.group;
+  worldGroup.remove(g);
+  g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  W.repeaters.splice(W.repeaters.indexOf(rep), 1);
+  repeaterGroups.splice(repeaterGroups.indexOf(g), 1);
+  hideRepMenu();
+  updateLinked();
+  setStat('rep', W.repeaters.length);
+  showToast(`${rep.name} deleted`);
+}
+function repeaterFromTap(cx, cy) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const nx = ((cx - rect.left) / rect.width) * 2 - 1;
+  const ny = -((cy - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera({ x: nx, y: ny }, camera);
+  const hits = raycaster.intersectObjects(repeaterGroups, true);
+  if (!hits.length) return null;
+  let g = hits[0].object;
+  while (g && !g.userData.rep) g = g.parent;
+  return g ? g.userData.rep : null;
 }
 
 // Animated radar reveal. Merges into covAcc (or preview layer), painting
 // progressively behind a rotating sweep line.
-function revealSweep(tx, tz, antH, isPreview) {
+// Map scans: one at a time, map only. Click the map to set the target,
+// press SCAN (or Q for your own position) to run it.
+function runMapScan(x, z) {
   const { SIZE, GRID } = SIG;
-  // the ray starts at the antenna element (the sphere on the mast tip), not the mast base
-  const covNew = sweepCoverage(W.world.heights, W.treeGrid, tx, tz, antH + (isPreview ? 0 : 0.9));
-  const old = isPreview ? null : W.covAcc.slice();
-  if (!isPreview) for (let i = 0; i < covNew.length; i++) if (covNew[i] > W.covAcc[i]) W.covAcc[i] = covNew[i];
-
-  // texels of the new sweep, sorted by angle around the transmitter
-  const ang = new Float32Array(GRID * GRID).fill(-1e9);
-  const order = [];
-  for (let iz = 0; iz < GRID; iz++) for (let ix = 0; ix < GRID; ix++) {
-    const s = covNew[iz * GRID + ix];
-    if (s <= 0) continue;
-    const x = (ix + 0.5) / GRID * SIZE, z = (iz + 0.5) / GRID * SIZE;
-    const a = Math.atan2(z - tz, x - tx);
-    ang[iz * GRID + ix] = a;
-    order.push({ i: iz * GRID + ix, a, d: Math.hypot(x - tx, z - tz) });
-  }
-  order.sort((p, q) => p.a - q.a);
-
-  const gy = sampleH(W.world.heights, GRID, SIZE, tx, tz);
-  sweepLine.visible = true;
-  sweepLine.position.set(tx, gy + 3, tz);
-  sweepRing.visible = true;
-  sweepRing.position.set(tx, gy + 3, tz);
-
-  const target = isPreview ? prevCtx : covCtx;
-  const img = target.createImageData(GRID, GRID);
-  const data = img.data;
-  const DUR = isPreview ? 0.9 : 1.4;
-  W.revealing = { order, ang, old, isPreview, covNew, target, img, data, t: 0, DUR, tx, tz };
-
-  if (isPreview) { W.preview = { alpha: 0 }; }
-  return covNew;
+  const t0 = performance.now();
+  const cov = sweepCoverage(W.world.heights, W.treeGrid, x, z, 2 + 0.9); // 2 m antenna + sphere
+  W.scan = { x, z, cov };
+  paintScan(cov);
+  drawMinimap();
+  let n = 0;
+  for (let i = 0; i < cov.length; i++) if (cov[i] > SIG.COVER_T) n++;
+  setStat('scan', (n / cov.length * 100).toFixed(1) + '% of map');
 }
 
-function stepReveal(dt) {
-  const R = W.revealing;
-  if (!R) return;
-  R.t += dt;
-  const k = Math.min(1, R.t / R.DUR);
-  const curA = -Math.PI + k * Math.PI * 2;
-  const { GRID } = SIG, data = R.data, ang = R.ang;
-  for (let i = 0, p = 0; i < ang.length; i++, p += 4) {
-    let s = R.isPreview ? 0 : R.old[i];
-    if (ang[i] <= curA) {
-      const ns = R.isPreview ? R.covNew[i] : W.covAcc[i];
-      if (ns > s) s = ns;
-    }
-    if (s > 0) {
-      data[p] = 255; data[p + 1] = 42; data[p + 2] = 42;
-      data[p + 3] = Math.round(255 * (0.22 + 0.60 * Math.min(1, s * 2.4)));
-    } else { data[p + 3] = 0; }
-  }
-  R.target.putImageData(R.img, 0, 0);
-  (R.isPreview ? prevTex : covTex).needsUpdate = true;
-
-  const cur = R.order[Math.min(R.order.length - 1, (k * R.order.length) | 0)];
-  if (cur) {
-    sweepLine.rotation.y = -cur.a;
-    sweepLine.position.x = R.tx + Math.cos(cur.a) * SIG.MAX_RANGE / 2;
-    sweepLine.position.z = R.tz + Math.sin(cur.a) * SIG.MAX_RANGE / 2;
-    sweepRing.scale.set(cur.d, cur.d, 1);
-  }
-  if (k >= 1) {
-    sweepLine.visible = false; sweepRing.visible = false;
-    if (R.isPreview) {
-      // persistent preview (orange) until the next scan or repeater drop
-      let n = 0;
-      for (let i = 0; i < R.covNew.length; i++) if (R.covNew[i] > 0) n++;
-      const pct = (n / R.covNew.length * 100).toFixed(1);
-      W.preview = { alpha: 1 };
-      setPrevAlpha(1);
-      if (n === 0) {
-        setStat('scan', 'no signal here — try higher ground');
-        showToast('no signal here — try higher ground');
-      } else {
-        setStat('scan', `preview: ${pct}% in range`);
-        showToast(`scan complete: ${pct}% of map in range`);
-      }
-    }
-    else { paintCoverage(covCtx, W.covAcc); updateStats(); }
-    W.revealing = null;
-  }
-}
-
-function paintCoverage(ctx, cov) {
+function paintScan(cov) {
   const { GRID } = SIG;
-  const img = ctx.createImageData(GRID, GRID);
+  const img = scanCtx.createImageData(GRID, GRID);
   const d = img.data;
   for (let i = 0, p = 0; i < cov.length; i++, p += 4) {
     const s = cov[i];
@@ -1087,31 +1038,21 @@ function paintCoverage(ctx, cov) {
       d[p + 3] = Math.round(255 * (0.22 + 0.60 * Math.min(1, s * 2.4)));
     }
   }
-  ctx.putImageData(img, 0, 0);
-  covTex.needsUpdate = true;
+  scanCtx.putImageData(img, 0, 0);
 }
 
-function setPrevAlpha(a) {
-  const sh = terrainMesh.material.userData.sh;
-  if (sh) sh.uniforms.uPrevA.value = a;
-}
-function clearPreview() {
-  W.preview = null;
-  prevCtx.clearRect(0, 0, SIG.GRID, SIG.GRID);
-  prevTex.needsUpdate = true;
-  setPrevAlpha(0);
-  setStat('scan', '—');
-}
-
-function updateStats() {
+// "Linked" = a live RF link exists from the person to any repeater.
+function updateLinked() {
   const { SIZE, GRID } = SIG;
-  let n = 0;
-  for (let i = 0; i < W.covAcc.length; i++) if (W.covAcc[i] > 0) n++;
-  setStat('cov', (n / W.covAcc.length * 100).toFixed(1) + '% of map');
   let reached = 0;
   for (const g of personMeshes) {
     const p = g.userData.person;
-    const okp = sampleCov(W.covAcc, SIZE, GRID, p.x, p.z) > SIG.REACH_T;
+    let okp = false;
+    for (const r of W.repeaters) {
+      const s = linkStrength(W.world.heights, GRID, SIZE, W.treeGrid,
+        p.x, p.z, 1.7, r.x, r.z, r.antH + 0.9);
+      if (s > SIG.REACH_T) { okp = true; break; }
+    }
     g.userData.reached = okp;
     if (okp) reached++;
     const col = okp ? 0x33dd55 : 0xff5533;
@@ -1123,6 +1064,7 @@ function updateStats() {
   setStat('people', reached === W.people.length ? 'everyone is linked!' : `${W.people.length - reached} still need a repeater`);
   setStat('rep', W.repeaters.length);
 }
+function updateStats() { updateLinked(); }
 
 /* ================= minimap ================= */
 function hypo(h) {
@@ -1215,14 +1157,15 @@ function drawMinimap() {
   const S = 512, k = S / SIG.SIZE;
   mmCtx.clearRect(0, 0, S, S);
   mmCtx.drawImage(mmBase, 0, 0, S, S);
-  if (W.preview && W.preview.alpha > 0) {
-    mmCtx.globalAlpha = 0.9;
-    mmCtx.drawImage(prevCanvas, 0, 0, S, S);
+  if (W.scan) {
+    mmCtx.globalAlpha = 0.85;
+    mmCtx.drawImage(scanCanvas, 0, 0, S, S);
     mmCtx.globalAlpha = 1;
+    // scan origin marker
+    mmCtx.fillStyle = '#ffdd44';
+    const sx = W.scan.x * k, sz = W.scan.z * k;
+    mmCtx.beginPath(); mmCtx.arc(sx, sz, 6, 0, 7); mmCtx.fill();
   }
-  mmCtx.globalAlpha = 0.85;
-  mmCtx.drawImage(covCanvas, 0, 0, S, S);
-  mmCtx.globalAlpha = 1;
   // people (dots + hash labels + 10s message flash halos)
   const now = performance.now();
   mmCtx.font = '600 10px system-ui, sans-serif'; mmCtx.textAlign = 'left'; mmCtx.textBaseline = 'middle';
@@ -1295,12 +1238,13 @@ function flashPerson(p) {
 
 // Discovery: a repeater replies if you're standing inside its own coverage
 // map — i.e. exactly where the map is red for that repeater.
+// Discovery: a repeater replies if a live link exists from your handheld.
 function discoverRepeaters() {
   const { SIZE, GRID } = SIG;
   let n = 0;
   for (const r of W.repeaters) {
-    if (!r.cov) continue;
-    const s = sampleCov(r.cov, SIZE, GRID, W.player.x, W.player.z);
+    const s = linkStrength(W.world.heights, GRID, SIZE, W.treeGrid,
+      W.player.x, W.player.z, 2, r.x, r.z, r.antH + 0.9);
     if (s > SIG.COVER_T) {
       n++;
       r.lastSeen = Date.now(); r.lastSignal = s;
@@ -1448,9 +1392,15 @@ function setStat(id, txt) { document.getElementById('st-' + id).textContent = tx
 function wireUI() {
   wireDevice();
   document.getElementById('drop').onclick = () => { hideHelp(); dropRepeater(); };
-  document.getElementById('scan').onclick = () => { hideHelp(); scanPreview(); };
   document.getElementById('mapbtn').onclick = () => toggleMap();
   document.getElementById('newmap').onclick = () => buildWorld((Math.random() * 1e9) | 0);
+  document.getElementById('mapscan').onclick = (e) => {
+    e.stopPropagation();
+    if (W.waypoint) runMapScan(W.waypoint.x, W.waypoint.z);
+    else showToast('click the map to set a scan target first');
+  };
+  document.getElementById('rm-delete').onclick = () => { if (menuRep) deleteRepeater(menuRep); };
+  document.getElementById('rm-close').onclick = hideRepMenu;
   mapEl.addEventListener('click', (e) => {
     if (mapEl.classList.contains('expanded')) setWaypointFromEvent(e);
     else toggleMap(true);
@@ -1459,9 +1409,18 @@ function wireUI() {
     hideHelp();
     lockPointer();
   });
-  // clicking the 3D view also captures the mouse (when the map is closed)
-  renderer.domElement.addEventListener('click', () => {
+  // clicking the 3D view: repeater menu if one was clicked, else capture the mouse
+  renderer.domElement.addEventListener('click', (e) => {
     if (!helpEl.classList.contains('hidden') || mapEl.classList.contains('expanded')) return;
+    if (document.pointerLockElement) {
+      // looking at a repeater (crosshair)? open its menu
+      const rep = repeaterFromTap(innerWidth / 2, innerHeight / 2);
+      if (rep) showRepMenu(rep);
+      return;
+    }
+    if (IS_TOUCH) return;
+    const rep = repeaterFromTap(e.clientX, e.clientY);
+    if (rep) { showRepMenu(rep); return; }
     lockPointer();
   });
 }
@@ -1488,7 +1447,12 @@ function wireInput() {
     if (e.code === 'Space') e.preventDefault();
     W.keys[e.code] = true;
     if (e.code === 'KeyE') { hideHelp(); dropRepeater(); }
-    if (e.code === 'KeyQ') { hideHelp(); scanPreview(); }
+    if (e.code === 'KeyQ') {
+      hideHelp();
+      // personal scan: map must be open; scans from your position
+      if (mapEl.classList.contains('expanded')) runMapScan(W.player.x, W.player.z);
+      else showToast('open the map (M) to scan');
+    }
     if (e.code === 'KeyM') toggleMap();
     if (e.code === 'KeyB') devToggle();
     if (e.code === 'KeyX') { W.waypoint = null; waypointMesh.visible = false; }
@@ -1548,10 +1512,17 @@ function wireInput() {
   const lookEnd = (e) => {
     if (e.pointerId !== lookId) return;
     lookId = null;
-    // touch: a tap (not a drag) on the 3D view closes the expanded map
-    if (e.pointerType === 'touch' && mapEl.classList.contains('expanded') &&
-        Math.hypot(e.clientX - tapOX, e.clientY - tapOY) < 12 &&
-        performance.now() - tapT < 350) toggleMap(false);
+    if (e.pointerType !== 'touch') return;
+    const isTap = Math.hypot(e.clientX - tapOX, e.clientY - tapOY) < 12 &&
+                  performance.now() - tapT < 350;
+    if (!isTap) return;
+    // touch: a tap on the 3D view closes the expanded map…
+    if (mapEl.classList.contains('expanded')) { toggleMap(false); return; }
+    // …otherwise it may open a repeater's menu
+    if (helpEl.classList.contains('hidden')) {
+      const rep = repeaterFromTap(e.clientX, e.clientY);
+      if (rep) showRepMenu(rep);
+    }
   };
   cv.addEventListener('pointerup', lookEnd);
   cv.addEventListener('pointercancel', lookEnd);
@@ -1601,7 +1572,6 @@ function tick(t) {
   const tt = t / 1000;
 
   stepPlayer(dt); // movement, collision, eye height, camera pose
-  stepReveal(dt);
   if (W.sky) W.sky.position.copy(camera.position); // sky dome follows the eye
 
   // life: beacons, rings, waypoint bob
@@ -1638,7 +1608,7 @@ function tick(t) {
   renderer.render(scene, camera);
 }
 
-window.__sig = { W, buildWorld, dropRepeater, scanPreview, toggleMap };
+window.__sig = { W, buildWorld, dropRepeater, runMapScan, toggleMap, showRepMenu, hideRepMenu, deleteRepeater };
 addEventListener('load', init);
 </script>
 </body>

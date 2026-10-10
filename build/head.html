@@ -25,6 +25,15 @@
   #toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%);z-index:25;display:none;
     background:rgba(12,16,22,.92);border:1px solid #2a3340;border-radius:8px;
     padding:8px 16px;font-size:13px;color:#ffd75e;white-space:nowrap;}
+  /* repeater menu popup */
+  #repmenu{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:28;
+    background:#141a23;border:1px solid #2a3340;border-radius:14px;padding:20px 24px;
+    display:flex;flex-direction:column;gap:10px;align-items:center;min-width:220px;}
+  #repmenu.hidden{display:none;}
+  #repmenu .rm-title{font-size:12px;letter-spacing:.15em;color:#9fb0c3;}
+  #repmenu .rm-id{font:600 22px ui-monospace,monospace;color:#ffd75e;letter-spacing:.1em;}
+  #repmenu button{width:100%;}
+  #rm-delete{background:#5a1f1f;border-color:#8a2a2a;color:#ffb0b0;}
   /* minimap: small bottom-right, grows to near-fullscreen */
   #minimap{position:fixed;z-index:20;right:12px;bottom:12px;width:190px;height:190px;
     border:2px solid #2a3340;border-radius:10px;overflow:hidden;background:#0b0e12;cursor:pointer;
@@ -37,6 +46,9 @@
   #minimap .cap{position:absolute;left:0;right:0;bottom:0;text-align:center;font-size:12px;
     color:#ffd75e;background:rgba(12,16,22,.75);padding:6px;display:none;}
   #minimap.expanded .cap{display:block;}
+  #mapscan{position:absolute;left:50%;transform:translateX(-50%);bottom:34px;display:none;
+    z-index:5;background:#ffd75e;border-color:#ffd75e;color:#141a23;font-weight:700;}
+  #minimap.expanded #mapscan{display:block;}
   #minimap .tag{position:absolute;top:4px;left:8px;font-size:11px;letter-spacing:.1em;color:#9fb0c3;
     background:rgba(12,16,22,.7);padding:2px 6px;border-radius:4px;}
   /* help overlay */
@@ -125,6 +137,12 @@
 <canvas id="c"></canvas>
 <div id="cross"></div>
 <div id="toast"></div>
+<div id="repmenu" class="hidden">
+  <div class="rm-title">REPEATER</div>
+  <div class="rm-id" id="rm-id">····</div>
+  <button id="rm-delete">delete repeater</button>
+  <button id="rm-close" class="ghost">close</button>
+</div>
 <div id="devbtn" title="MeshCore device (B)">📻</div>
 <div id="device">
   <div class="dev-ant"></div>
@@ -159,18 +177,18 @@
 </div>
 <div class="panel" id="ctl">
   <button id="drop">drop repeater <span style="opacity:.6">(E)</span></button>
-  <button class="ghost" id="scan">scan here <span style="opacity:.6">(Q)</span></button>
   <button class="ghost" id="mapbtn">map <span style="opacity:.6">(M)</span></button>
   <button class="ghost" id="newmap">new map</button>
 </div>
 <div id="minimap"><span class="tag">MAP</span><canvas id="mm" width="512" height="512"></canvas>
-  <div class="cap">click to set waypoint · <b>M</b> to close</div></div>
+  <div class="cap">click to set scan target · <b>M</b> to close</div>
+  <button id="mapscan">SCAN</button></div>
 <div id="joy"><div id="joyknob"></div></div>
 <div id="help"><div class="card">
   <h2>MESHCORE FPV</h2>
   <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>shift</kbd> run (10×) · mouse looks around.<br>
-  <kbd>E</kbd> drop a repeater where you stand · <kbd>Q</kbd> scan preview here (orange, stays until next scan).<br>
-  <kbd>M</kbd> grows the map (<kbd>esc</kbd> closes) — click it to set a waypoint.<br>
+  <kbd>E</kbd> drop a repeater where you stand · click a repeater to see its ID / delete it.<br>
+  <kbd>M</kbd> opens the map — click to set a scan target, press SCAN (or <kbd>Q</kbd> for your position).<br>
   <kbd>B</kbd> opens your 📻 MeshCore device: discover repeaters, chat on the public channel.<br>
   Link all 12 people. Ridges block, trees weaken, height wins.</p>
   <p style="color:#ffd75e">click to start walking</p>
