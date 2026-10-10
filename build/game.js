@@ -1214,40 +1214,60 @@ async function pkFetchRoads(lat, lon, onProgress) {
   const mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
   const dLat = (SIZE_M / 2) / mPerDegLat, dLon = (SIZE_M / 2) / mPerDegLon;
   const south = lat - dLat, north = lat + dLat, west = lon - dLon, east = lon + dLon;
-  onProgress('fetching roads…');
-  const r = await fetch(`https://api.openstreetmap.org/api/0.6/map?bbox=${west},${south},${east},${north}`);
-  if (!r.ok) throw new Error('roads fetch failed: ' + r.status);
-  const xml = await r.text();
-  const doc = new DOMParser().parseFromString(xml, 'text/xml');
-  const nodes = {};
-  for (const n of doc.getElementsByTagName('node')) {
-    nodes[n.getAttribute('id')] = {
-      lat: parseFloat(n.getAttribute('lat')),
-      lon: parseFloat(n.getAttribute('lon')),
-    };
-  }
-  const widthFor = (t) => t === 'motorway' ? 14 : t === 'trunk' ? 11 : t === 'primary' ? 9 : t === 'secondary' ? 8 : 6;
-  const okHwy = /^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$/;
-  const roads = [];
-  for (const w of doc.getElementsByTagName('way')) {
-    let hwy = null;
-    for (const t of w.getElementsByTagName('tag')) {
-      if (t.getAttribute('k') === 'highway') hwy = t.getAttribute('v');
+  const dbg = PK.roadDebug = { bbox: [west, south, east, north], step: 'start' };
+  try {
+    onProgress('fetching roads…');
+    dbg.url = `https://api.openstreetmap.org/api/0.6/map?bbox=${west},${south},${east},${north}`;
+    dbg.step = 'fetching';
+    const r = await fetch(dbg.url);
+    dbg.step = 'fetched'; dbg.status = r.status;
+    if (!r.ok) throw new Error('roads fetch failed: ' + r.status);
+    const xml = await r.text();
+    dbg.step = 'parsing'; dbg.xmlLen = xml.length;
+    dbg.xmlHead = xml.slice(0, 200);
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    const parseErr = doc.getElementsByTagName('parsererror');
+    if (parseErr.length) throw new Error('XML parse error: ' + parseErr[0].textContent.slice(0, 120));
+    const nodes = {};
+    const nodeEls = doc.getElementsByTagName('node');
+    dbg.step = 'nodes'; dbg.nodeCount = nodeEls.length;
+    for (const n of nodeEls) {
+      nodes[n.getAttribute('id')] = {
+        lat: parseFloat(n.getAttribute('lat')),
+        lon: parseFloat(n.getAttribute('lon')),
+      };
     }
-    if (!hwy || !okHwy.test(hwy)) continue;
-    const pts = [];
-    for (const nd of w.getElementsByTagName('nd')) {
-      const n = nodes[nd.getAttribute('ref')];
-      if (!n) continue;
-      pts.push({
-        x: (n.lon - lon) * mPerDegLon + SIZE_M / 2,
-        z: (lat - n.lat) * mPerDegLat + SIZE_M / 2,
-      });
+    const widthFor = (t) => t === 'motorway' ? 14 : t === 'trunk' ? 11 : t === 'primary' ? 9 : t === 'secondary' ? 8 : 6;
+    const okHwy = /^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$/;
+    const roads = [];
+    const wayEls = doc.getElementsByTagName('way');
+    dbg.step = 'ways'; dbg.wayCount = wayEls.length;
+    let hwyWays = 0;
+    for (const w of wayEls) {
+      let hwy = null;
+      for (const t of w.getElementsByTagName('tag')) {
+        if (t.getAttribute('k') === 'highway') hwy = t.getAttribute('v');
+      }
+      if (!hwy || !okHwy.test(hwy)) continue;
+      hwyWays++;
+      const pts = [];
+      for (const nd of w.getElementsByTagName('nd')) {
+        const n = nodes[nd.getAttribute('ref')];
+        if (!n) continue;
+        pts.push({
+          x: (n.lon - lon) * mPerDegLon + SIZE_M / 2,
+          z: (lat - n.lat) * mPerDegLat + SIZE_M / 2,
+        });
+      }
+      if (pts.length >= 2) roads.push({ pts, w: widthFor(hwy) });
     }
-    if (pts.length >= 2) roads.push({ pts, w: widthFor(hwy) });
+    dbg.step = 'done'; dbg.hwyWays = hwyWays; dbg.roadCount = roads.length;
+    onProgress(`found ${roads.length} roads (${dbg.nodeCount} nodes, ${dbg.wayCount} ways)`);
+    return roads;
+  } catch (e) {
+    dbg.step = 'error'; dbg.error = e.message;
+    throw e;
   }
-  onProgress(`found ${roads.length} roads`);
-  return roads;
 }
 async function pkGenerate() {
   const lat = PK.selLat !== null ? PK.selLat : PK.lat;
@@ -1282,5 +1302,5 @@ async function pkGenerate() {
   btn.disabled = false;
 }
 
-window.__sig = { W, buildWorld, dropRepeater, runMapScan, toggleMap, showRepMenu, hideRepMenu, deleteRepeater };
+window.__sig = { W, buildWorld, dropRepeater, runMapScan, toggleMap, showRepMenu, hideRepMenu, deleteRepeater, PK };
 addEventListener('load', init);
