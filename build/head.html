@@ -20,12 +20,6 @@
   button{font:600 14px system-ui;letter-spacing:.04em;color:#0b0e12;background:#ffd75e;border:0;
     border-radius:8px;padding:10px 16px;cursor:pointer;}
   button.ghost{background:#2a3340;color:#e8ecf1;}
-  #mast{bottom:12px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;
-    z-index:10;position:fixed;background:rgba(12,16,22,.82);border:1px solid #2a3340;border-radius:10px;
-    padding:10px 14px;backdrop-filter:blur(4px);width:min(480px,72vw);}
-  #mast label{font-size:12px;color:#9fb0c3;white-space:nowrap;}
-  #mast input{flex:1;accent-color:#ffd75e;}
-  #antval{font-size:13px;color:#fff;min-width:44px;text-align:right;}
   #cross{position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;
     background:rgba(255,255,255,.85);z-index:5;pointer-events:none;}
   #toast{position:fixed;left:50%;bottom:78px;transform:translateX(-50%);z-index:25;display:none;
@@ -60,7 +54,6 @@
   #joyknob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px;border-radius:50%;
     background:rgba(255,215,94,.55);touch-action:none;}
   body.touch #joy{display:block;}
-  body.touch #mast{display:none;}
   /* simulated MeshCore handheld: chunky radio body + LCD screen */
   #devbtn{position:fixed;left:12px;bottom:12px;z-index:22;width:52px;height:52px;border-radius:50%;
     background:#1b2534;border:2px solid #2a3340;font-size:24px;cursor:pointer;display:flex;
@@ -169,11 +162,6 @@
   <button class="ghost" id="scan">scan here <span style="opacity:.6">(Q)</span></button>
   <button class="ghost" id="mapbtn">map <span style="opacity:.6">(M)</span></button>
   <button class="ghost" id="newmap">new map</button>
-</div>
-<div id="mast">
-  <label>REPEATER MAST</label>
-  <input type="range" id="ant" min="2" max="25" step="1" value="10">
-  <span id="antval">10 m</span>
 </div>
 <div id="minimap"><span class="tag">MAP</span><canvas id="mm" width="512" height="512"></canvas>
   <div class="cap">click to set waypoint · <b>M</b> to close</div></div>

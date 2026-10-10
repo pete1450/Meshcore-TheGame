@@ -10,7 +10,7 @@ const W = {
   covAcc: null,                 // union of all repeater sweeps
   repeaters: [],
   player: { x: 512, z: 512, yaw: 0, pitch: 0, eyeY: 60 },
-  antH: 10,
+  antH: 2,
   waypoint: null,
   preview: null,                // {cov, alpha, t} handheld scan preview
   revealing: null,              // active sweep-reveal animation
@@ -276,10 +276,10 @@ function buildWorld(seed) {
   for (const p of W.people) {
     const g = new THREE.Group();
     const gy = sampleH(H, GRID, SIZE, p.x, p.z);
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.6, 4.5, 8), new THREE.MeshLambertMaterial({ color: 0xff5533 }));
-    body.position.y = 2.25;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 8), new THREE.MeshLambertMaterial({ color: 0xe8b98a }));
-    head.position.y = 5.4;
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.0, 1.5, 8), new THREE.MeshLambertMaterial({ color: 0xff5533 }));
+    body.position.y = 0.75;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.37, 8, 8), new THREE.MeshLambertMaterial({ color: 0xe8b98a }));
+    head.position.y = 1.8;
     const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.6, 24), new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.6;
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 46, 6, 1, true),
@@ -362,7 +362,8 @@ function scanPreview() {
 // progressively behind a rotating sweep line.
 function revealSweep(tx, tz, antH, isPreview) {
   const { SIZE, GRID } = SIG;
-  const covNew = sweepCoverage(W.world.heights, W.treeGrid, tx, tz, antH);
+  // the ray starts at the antenna element (the sphere on the mast tip), not the mast base
+  const covNew = sweepCoverage(W.world.heights, W.treeGrid, tx, tz, antH + (isPreview ? 0 : 0.9));
   const old = isPreview ? null : W.covAcc.slice();
   if (!isPreview) for (let i = 0; i < covNew.length; i++) if (covNew[i] > W.covAcc[i]) W.covAcc[i] = covNew[i];
 
@@ -716,8 +717,8 @@ function addChannelMsg(who, text, cls) {
 
 function nodePos(n) {
   if (n.kind === 'player') return { x: W.player.x, z: W.player.z, h: 2 };
-  if (n.kind === 'rep') return { x: n.ref.x, z: n.ref.z, h: n.ref.antH };
-  return { x: n.ref.x, z: n.ref.z, h: 1.5 }; // person (client)
+  if (n.kind === 'rep') return { x: n.ref.x, z: n.ref.z, h: n.ref.antH + 0.9 }; // antenna sphere
+  return { x: n.ref.x, z: n.ref.z, h: 1.7 }; // person (client): head height
 }
 
 function sendChat() {
@@ -820,12 +821,6 @@ function wireUI() {
   document.getElementById('scan').onclick = () => { hideHelp(); scanPreview(); };
   document.getElementById('mapbtn').onclick = () => toggleMap();
   document.getElementById('newmap').onclick = () => buildWorld((Math.random() * 1e9) | 0);
-  const sl = document.getElementById('ant');
-  sl.oninput = () => {
-    W.antH = +sl.value;
-    document.getElementById('antval').textContent = W.antH + ' m';
-  };
-  W.antH = +sl.value;
   mapEl.addEventListener('click', (e) => {
     if (mapEl.classList.contains('expanded')) setWaypointFromEvent(e);
     else toggleMap(true);

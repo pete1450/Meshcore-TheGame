@@ -11,12 +11,13 @@ const SIG = {
   MAX_RANGE: 1300,     // sweep stops here (m)
   RAY_STEP: 4,         // march step along each ray (m)
   RAY_COUNT: 720,      // 0.5-degree rays
-  RX_H: 1.5,           // receiver height above ground (handheld, m)
+  RX_H: 1.7,           // receiver height above ground (head/handheld, m)
   DECAY: 3000,         // very gentle distance falloff: clear LOS reaches, period
   NLOS_RANGE: 300,     // how far past the first blockage NLOS can still reach (m)
   NLOS_DEPTH: 40,      // diffraction penalty scale for depth below LOS line (m)
   TREE_K: 0.025,       // attenuation per tree per 8 m of forest, where the ray is in the canopy
   CANOPY_H: 24,        // ray height above ground below which trees attenuate (m)
+  LOS_CLEAR: 3,        // terrain within this many m above the sightline still counts as radio LOS
   COVER_T: 0.06,       // strength above this counts as covered
   REACH_T: 0.10,       // strength above this counts a person as reached
   LINK_NLOS: 600,      // max distance for a non-LOS direct link (m)
@@ -313,10 +314,16 @@ function treeCountAt(treeGrid, size, x, z) {
   const iz = Math.min(tg - 1, Math.max(0, (z / size * tg) | 0));
   return treeGrid[iz * tg + ix];
 }
+function treeCellAt(treeGrid, size, x, z) {
+  const tg = SIG.TREE_GRID;
+  const ix = Math.min(tg - 1, Math.max(0, (x / size * tg) | 0));
+  const iz = Math.min(tg - 1, Math.max(0, (z / size * tg) | 0));
+  return iz * tg + ix;
+}
 
 // 360-degree sweep from a transmitter. Returns Float32Array GRID*GRID of signal strength.
 function sweepCoverage(heights, treeGrid, tx, tz, antH) {
-  const { SIZE, GRID, MAX_RANGE, RAY_STEP, RAY_COUNT, RX_H, DECAY, NLOS_RANGE, NLOS_DEPTH, TREE_K, CANOPY_H, COVER_T } = SIG;
+  const { SIZE, GRID, MAX_RANGE, RAY_STEP, RAY_COUNT, RX_H, DECAY, NLOS_RANGE, NLOS_DEPTH, TREE_K, CANOPY_H, LOS_CLEAR, COVER_T } = SIG;
   const cov = new Float32Array(GRID * GRID);
   const hSrc = sampleH(heights, GRID, SIZE, tx, tz) + antH;
   const cell = SIZE / GRID;
@@ -326,19 +333,23 @@ function sweepCoverage(heights, treeGrid, tx, tz, antH) {
     const ang = (r / RAY_COUNT) * Math.PI * 2;
     const dx = Math.cos(ang), dz = Math.sin(ang);
     // Pass 1: walk the ray, recording terrain + prefix sums of tree counts.
+    // Each tree-grid cell counts once per ray (steps are 4 m, cells 25 m).
     const rec = [];   // per step: {x,z,e,d,n,sT,slopeMax,los}
     const pref = [0]; // pref[k] = tree count over steps [0,k)
+    const seenCells = new Set();
     let slopeMax = -Infinity;
     for (let d = RAY_STEP; d <= MAX_RANGE; d += RAY_STEP) {
       const x = tx + dx * d, z = tz + dz * d;
       if (x < 0 || x >= SIZE || z < 0 || z >= SIZE) break;
       const e = sampleH(heights, GRID, SIZE, x, z);
-      const n = treeCountAt(treeGrid, SIZE, x, z);
+      const cellIdx = treeCellAt(treeGrid, SIZE, x, z);
+      const n = seenCells.has(cellIdx) ? 0 : treeGrid[cellIdx];
+      seenCells.add(cellIdx);
       pref.push(pref[pref.length - 1] + n);
       const sMid = (e - hSrc) / d;
       if (sMid > slopeMax) slopeMax = sMid;
       const sT = (e + RX_H - hSrc) / d;
-      rec.push({ x, z, e, d, n, sT, slopeMax, los: sT >= slopeMax });
+      rec.push({ x, z, e, d, n, sT, slopeMax, los: sT >= slopeMax - LOS_CLEAR / d });
     }
     // Pass 2: exact canopy-gated tree loss for LOS texels. Step j's trees count
     // for texel i iff the segment to i passes within CANOPY_H of the ground
@@ -415,7 +426,7 @@ function linkStrength(h, grid, size, treeGrid, ax, az, ah, bx, bz, bh) {
     if (atten < 0.005) break;
   }
   const base = Math.exp(-dist / DECAY);
-  if ((hB - hA) / dist >= slopeMax) return base * atten; // line of sight
+  if ((hB - hA) / dist >= slopeMax - SIG.LOS_CLEAR / dist) return base * atten; // radio LOS
   if (dist > LINK_NLOS) return 0;
   const excess = slopeMax * dist + hA - hB; // meters below the LOS line
   return base * Math.exp(-excess / NLOS_DEPTH) * atten;
