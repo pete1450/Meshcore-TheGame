@@ -1026,6 +1026,7 @@ function pkInit() {
   let dragging = false, sx = 0, sy = 0, moved = 0;
   const n = () => Math.pow(2, PK.zoom) * 256;
   el.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('#pk-zoom')) return; // let zoom buttons handle it
     dragging = true; moved = 0; sx = e.clientX; sy = e.clientY;
     el.setPointerCapture(e.pointerId);
   });
@@ -1041,6 +1042,7 @@ function pkInit() {
     pkRender();
   });
   el.addEventListener('pointerup', (e) => {
+    if (e.target.closest('#pk-zoom')) return; // zoom button, not a map tap
     dragging = false;
     if (moved < 8) { // tap: select this point
       const r = el.getBoundingClientRect();
