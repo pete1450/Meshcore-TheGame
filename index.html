@@ -56,13 +56,10 @@
   #help kbd{background:#2a3340;border-radius:4px;padding:1px 7px;font:600 12px system-ui;color:#fff;}
   /* touch controls */
   #joy{position:fixed;left:18px;bottom:70px;width:110px;height:110px;border-radius:50%;z-index:15;
-    border:2px solid rgba(255,255,255,.25);background:rgba(20,26,35,.35);display:none;}
+    border:2px solid rgba(255,255,255,.25);background:rgba(20,26,35,.35);display:none;touch-action:none;}
   #joyknob{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px;border-radius:50%;
-    background:rgba(255,215,94,.55);}
-  #touchbtns{position:fixed;right:16px;bottom:220px;z-index:15;display:none;flex-direction:column;gap:10px;}
-  #touchbtns button{width:64px;height:64px;border-radius:50%;padding:0;font-size:13px;}
+    background:rgba(255,215,94,.55);touch-action:none;}
   body.touch #joy{display:block;}
-  body.touch #touchbtns{display:flex;}
   body.touch #mast{display:none;}
   /* simulated MeshCore handheld: chunky radio body + LCD screen */
   #devbtn{position:fixed;left:12px;bottom:12px;z-index:22;width:52px;height:52px;border-radius:50%;
@@ -181,7 +178,6 @@
 <div id="minimap"><span class="tag">MAP</span><canvas id="mm" width="512" height="512"></canvas>
   <div class="cap">click to set waypoint · <b>M</b> to close</div></div>
 <div id="joy"><div id="joyknob"></div></div>
-<div id="touchbtns"><button id="tdrop">DROP</button><button id="tmap" class="ghost">MAP</button></div>
 <div id="help"><div class="card">
   <h2>MESHCORE FPV</h2>
   <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>shift</kbd> run (10×) · mouse looks around.<br>
@@ -1455,8 +1451,6 @@ function wireUI() {
   document.getElementById('scan').onclick = () => { hideHelp(); scanPreview(); };
   document.getElementById('mapbtn').onclick = () => toggleMap();
   document.getElementById('newmap').onclick = () => buildWorld((Math.random() * 1e9) | 0);
-  document.getElementById('tdrop').onclick = () => dropRepeater();
-  document.getElementById('tmap').onclick = () => toggleMap();
   const sl = document.getElementById('ant');
   sl.oninput = () => {
     W.antH = +sl.value;
@@ -1543,10 +1537,13 @@ function wireInput() {
   joy.addEventListener('pointerup', joyEnd);
   joy.addEventListener('pointercancel', joyEnd);
 
-  let lookId = null, lx = 0, ly = 0;
+  let lookId = null, lx = 0, ly = 0, tapOX = 0, tapOY = 0, tapT = 0;
   const cv = renderer.domElement;
   cv.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'touch' && lookId === null) { lookId = e.pointerId; lx = e.clientX; ly = e.clientY; }
+    if (e.pointerType === 'touch' && lookId === null) {
+      lookId = e.pointerId; lx = e.clientX; ly = e.clientY;
+      tapOX = e.clientX; tapOY = e.clientY; tapT = performance.now();
+    }
   });
   cv.addEventListener('pointermove', (e) => {
     if (e.pointerId !== lookId) return;
@@ -1554,7 +1551,14 @@ function wireInput() {
     W.player.pitch = clamp(W.player.pitch - (e.clientY - ly) * 0.005, -1.45, 1.45);
     lx = e.clientX; ly = e.clientY;
   });
-  const lookEnd = (e) => { if (e.pointerId === lookId) lookId = null; };
+  const lookEnd = (e) => {
+    if (e.pointerId !== lookId) return;
+    lookId = null;
+    // touch: a tap (not a drag) on the 3D view closes the expanded map
+    if (e.pointerType === 'touch' && mapEl.classList.contains('expanded') &&
+        Math.hypot(e.clientX - tapOX, e.clientY - tapOY) < 12 &&
+        performance.now() - tapT < 350) toggleMap(false);
+  };
   cv.addEventListener('pointerup', lookEnd);
   cv.addEventListener('pointercancel', lookEnd);
 }

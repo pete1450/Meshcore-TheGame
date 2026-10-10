@@ -820,8 +820,6 @@ function wireUI() {
   document.getElementById('scan').onclick = () => { hideHelp(); scanPreview(); };
   document.getElementById('mapbtn').onclick = () => toggleMap();
   document.getElementById('newmap').onclick = () => buildWorld((Math.random() * 1e9) | 0);
-  document.getElementById('tdrop').onclick = () => dropRepeater();
-  document.getElementById('tmap').onclick = () => toggleMap();
   const sl = document.getElementById('ant');
   sl.oninput = () => {
     W.antH = +sl.value;
@@ -908,10 +906,13 @@ function wireInput() {
   joy.addEventListener('pointerup', joyEnd);
   joy.addEventListener('pointercancel', joyEnd);
 
-  let lookId = null, lx = 0, ly = 0;
+  let lookId = null, lx = 0, ly = 0, tapOX = 0, tapOY = 0, tapT = 0;
   const cv = renderer.domElement;
   cv.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'touch' && lookId === null) { lookId = e.pointerId; lx = e.clientX; ly = e.clientY; }
+    if (e.pointerType === 'touch' && lookId === null) {
+      lookId = e.pointerId; lx = e.clientX; ly = e.clientY;
+      tapOX = e.clientX; tapOY = e.clientY; tapT = performance.now();
+    }
   });
   cv.addEventListener('pointermove', (e) => {
     if (e.pointerId !== lookId) return;
@@ -919,7 +920,14 @@ function wireInput() {
     W.player.pitch = clamp(W.player.pitch - (e.clientY - ly) * 0.005, -1.45, 1.45);
     lx = e.clientX; ly = e.clientY;
   });
-  const lookEnd = (e) => { if (e.pointerId === lookId) lookId = null; };
+  const lookEnd = (e) => {
+    if (e.pointerId !== lookId) return;
+    lookId = null;
+    // touch: a tap (not a drag) on the 3D view closes the expanded map
+    if (e.pointerType === 'touch' && mapEl.classList.contains('expanded') &&
+        Math.hypot(e.clientX - tapOX, e.clientY - tapOY) < 12 &&
+        performance.now() - tapT < 350) toggleMap(false);
+  };
   cv.addEventListener('pointerup', lookEnd);
   cv.addEventListener('pointercancel', lookEnd);
 }
