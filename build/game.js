@@ -128,8 +128,14 @@ function buildWorld(seed, worldOverride) {
     for (let ix = 0; ix <= RG; ix++)
       pos.setXYZ(iy * (RG + 1) + ix, ix / RG * SIZE, sampleH(H, GRID, SIZE, ix / RG * SIZE, iy / RG * SIZE), iy / RG * SIZE);
   geo.computeVertexNormals();
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  mat.onBeforeCompile = (sh) => {
+  let mat;
+  if (world.groundTexture) {
+    const tex = new THREE.CanvasTexture(world.groundTexture);
+    tex.anisotropy = 4;
+    mat = new THREE.MeshLambertMaterial({ map: tex });
+  } else {
+    mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    mat.onBeforeCompile = (sh) => {
     mat.userData.sh = sh;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying float vH;')
@@ -144,7 +150,8 @@ function buildWorld(seed, worldOverride) {
         float f250 = abs(fract(vH/250.0+0.5)-0.5)*250.0;
         hc = mix(hc, vec3(0.15,0.12,0.09), clamp((1.0-smoothstep(0.0,4.5,f50))*0.30 + (1.0-smoothstep(0.0,8.0,f250))*0.32, 0.0, 0.55));
         diffuseColor.rgb = hc;`);
-  };
+    };
+  }
   terrainMesh = new THREE.Mesh(geo, mat);
   worldGroup.add(terrainMesh);
 
@@ -751,7 +758,6 @@ function wireUI() {
   wireDevice();
   document.getElementById('drop').onclick = () => { hideHelp(); dropRepeater(); };
   document.getElementById('mapbtn').onclick = () => toggleMap();
-  document.getElementById('newmap').onclick = () => buildWorld((Math.random() * 1e9) | 0);
   document.getElementById('mapscan').onclick = (e) => {
     e.stopPropagation();
     if (W.waypoint) runMapScan(W.waypoint.x, W.waypoint.z);
@@ -759,7 +765,18 @@ function wireUI() {
   };
   document.getElementById('rm-delete').onclick = () => { if (menuRep) deleteRepeater(menuRep); };
   document.getElementById('rm-close').onclick = hideRepMenu;
-  document.getElementById('realmap').onclick = () => {
+  document.getElementById('menubtn').onclick = () => {
+    document.getElementById('menudlg').classList.remove('hidden');
+  };
+  document.getElementById('m-close').onclick = () => {
+    document.getElementById('menudlg').classList.add('hidden');
+  };
+  document.getElementById('m-newmap').onclick = () => {
+    document.getElementById('menudlg').classList.add('hidden');
+    buildWorld((Math.random() * 1e9) | 0);
+  };
+  document.getElementById('m-realmap').onclick = () => {
+    document.getElementById('menudlg').classList.add('hidden');
     document.getElementById('pickdlg').classList.remove('hidden');
     pkRender();
   };
@@ -1133,17 +1150,58 @@ async function pkFetchElevation(lat, lon, onProgress) {
   }
   return heights;
 }
+// Fetch OpenTopoMap tiles for the 3x3 mile bbox, stitch north-up into a canvas.
+async function pkFetchTexture(lat, lon, onProgress) {
+  const SIZE_M = 4828, Z = 15;
+  const mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
+  const dLat = (SIZE_M / 2) / mPerDegLat, dLon = (SIZE_M / 2) / mPerDegLon;
+  const n = Math.pow(2, Z);
+  // bbox in global pixel coords
+  const px = (lo) => (lo + 180) / 360 * n * 256;
+  const py = (la) => {
+    const r = la * Math.PI / 180;
+    return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n * 256;
+  };
+  const x0 = px(lon - dLon), x1 = px(lon + dLon);
+  const y0 = py(lat + dLat), y1 = py(lat - dLat); // y0 north (smaller)
+  const tx0 = Math.floor(x0 / 256), tx1 = Math.floor(x1 / 256);
+  const ty0 = Math.floor(y0 / 256), ty1 = Math.floor(y1 / 256);
+  const Wpx = Math.ceil(x1 - x0), Hpx = Math.ceil(y1 - y0);
+  onProgress(`fetching ${(tx1 - tx0 + 1) * (ty1 - ty0 + 1)} map tiles…`);
+  const canvas = document.createElement('canvas');
+  canvas.width = Wpx; canvas.height = Hpx;
+  const g = canvas.getContext('2d');
+  const sub = ['a', 'b', 'c'];
+  let si = 0;
+  for (let ty = ty0; ty <= ty1; ty++) {
+    for (let tx = tx0; tx <= tx1; tx++) {
+      const img = await pkLoadImage(`https://${sub[si++ % 3]}.tile.opentopomap.org/${Z}/${tx}/${ty}.png`);
+      g.drawImage(img, tx * 256 - x0, ty * 256 - y0);
+      onProgress(`fetching map tiles… ${si}/${(tx1 - tx0 + 1) * (ty1 - ty0 + 1)}`);
+    }
+  }
+  return canvas;
+}
 async function pkGenerate() {
   const lat = PK.selLat !== null ? PK.selLat : PK.lat;
   const lon = PK.selLon !== null ? PK.selLon : PK.lon;
+  const useTex = document.getElementById('pk-usetex').checked;
   const btn = document.getElementById('pk-generate');
   btn.disabled = true;
   try {
     const heights = await pkFetchElevation(lat, lon, pkStatus);
+    let texCanvas = null;
+    if (useTex) texCanvas = await pkFetchTexture(lat, lon, pkStatus);
     pkStatus('building map…');
     await new Promise(r => setTimeout(r, 30));
     const label = `real terrain ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     const world = generateRealMap(heights, (Math.random() * 1e9) | 0, label);
+    if (useTex) {
+      world.groundTexture = texCanvas;
+      world.noForest = true;
+      // no trees: override density
+      world.forestDensity = () => 0;
+    }
     document.getElementById('pickdlg').classList.add('hidden');
     buildWorld((Math.random() * 1e9) | 0, world);
     showToast('real terrain loaded: ' + label);
