@@ -175,6 +175,7 @@ function buildWorld(seed, worldOverride) {
   }
   }
   // real OSM roads (if fetched)
+  W.roadMeshCount = 0;
   if (world.roads && world.roads.length) {
     const roadMat = new THREE.MeshLambertMaterial({ color: 0x2e2c28, polygonOffset: true, polygonOffsetFactor: -2 });
     for (const road of world.roads) {
@@ -196,6 +197,7 @@ function buildWorld(seed, worldOverride) {
       rg.setAttribute('position', new THREE.Float32BufferAttribute(vp, 3));
       rg.setIndex(idx); rg.computeVertexNormals();
       worldGroup.add(new THREE.Mesh(rg, roadMat));
+      W.roadMeshCount++;
     }
   }
 
@@ -1262,8 +1264,22 @@ async function pkFetchRoads(lat, lon, onProgress) {
       if (pts.length >= 2) roads.push({ pts, w: widthFor(hwy) });
     }
     dbg.step = 'done'; dbg.hwyWays = hwyWays; dbg.roadCount = roads.length;
-    onProgress(`found ${roads.length} roads (${dbg.nodeCount} nodes, ${dbg.wayCount} ways)`);
-    return roads;
+    // clip to map bounds: drop points far outside, split ways at gaps
+    const clipped = [];
+    for (const r of roads) {
+      let seg = [];
+      for (const p of r.pts) {
+        if (p.x >= -50 && p.x <= SIZE_M + 50 && p.z >= -50 && p.z <= SIZE_M + 50) {
+          seg.push(p);
+        } else if (seg.length >= 2) {
+          clipped.push({ pts: seg, w: r.w }); seg = [];
+        } else seg = [];
+      }
+      if (seg.length >= 2) clipped.push({ pts: seg, w: r.w });
+    }
+    dbg.clippedCount = clipped.length;
+    onProgress(`found ${clipped.length} roads (${dbg.nodeCount} nodes, ${dbg.wayCount} ways)`);
+    return clipped;
   } catch (e) {
     dbg.step = 'error'; dbg.error = e.message;
     throw e;
