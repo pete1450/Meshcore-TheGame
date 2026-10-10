@@ -1959,29 +1959,43 @@ async function pkFetchTexture(lat, lon, onProgress) {
   }
   return canvas;
 }
-// Fetch real roads from OpenStreetMap (Overpass) for the 3x3 mile box.
+// Fetch real roads from OpenStreetMap main API for the 3x3 mile box.
 async function pkFetchRoads(lat, lon, onProgress) {
   const SIZE_M = 4828;
   const mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
   const dLat = (SIZE_M / 2) / mPerDegLat, dLon = (SIZE_M / 2) / mPerDegLon;
   const south = lat - dLat, north = lat + dLat, west = lon - dLon, east = lon + dLon;
   onProgress('fetching roads…');
-  const q = `[out:json][timeout:25];(way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$"](${south},${west},${north},${east}););out geom;`;
-  const r = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST', body: 'data=' + encodeURIComponent(q),
-  });
-  if (!r.ok) throw new Error('roads fetch failed');
-  const j = await r.json();
+  const r = await fetch(`https://api.openstreetmap.org/api/0.6/map?bbox=${west},${south},${east},${north}`);
+  if (!r.ok) throw new Error('roads fetch failed: ' + r.status);
+  const xml = await r.text();
+  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  const nodes = {};
+  for (const n of doc.getElementsByTagName('node')) {
+    nodes[n.getAttribute('id')] = {
+      lat: parseFloat(n.getAttribute('lat')),
+      lon: parseFloat(n.getAttribute('lon')),
+    };
+  }
   const widthFor = (t) => t === 'motorway' ? 14 : t === 'trunk' ? 11 : t === 'primary' ? 9 : t === 'secondary' ? 8 : 6;
+  const okHwy = /^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$/;
   const roads = [];
-  for (const el of j.elements || []) {
-    if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
-    const pts = el.geometry.map(p => ({
-      // lat/lon -> game x/z (x east, z south, origin at bbox center-northwest)
-      x: (p.lon - (west + east) / 2) * mPerDegLon + SIZE_M / 2,
-      z: ((north + south) / 2 - p.lat) * mPerDegLat + SIZE_M / 2,
-    }));
-    roads.push({ pts, w: widthFor(el.tags.highway) });
+  for (const w of doc.getElementsByTagName('way')) {
+    let hwy = null;
+    for (const t of w.getElementsByTagName('tag')) {
+      if (t.getAttribute('k') === 'highway') hwy = t.getAttribute('v');
+    }
+    if (!hwy || !okHwy.test(hwy)) continue;
+    const pts = [];
+    for (const nd of w.getElementsByTagName('nd')) {
+      const n = nodes[nd.getAttribute('ref')];
+      if (!n) continue;
+      pts.push({
+        x: (n.lon - lon) * mPerDegLon + SIZE_M / 2,
+        z: (lat - n.lat) * mPerDegLat + SIZE_M / 2,
+      });
+    }
+    if (pts.length >= 2) roads.push({ pts, w: widthFor(hwy) });
   }
   onProgress(`found ${roads.length} roads`);
   return roads;
