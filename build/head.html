@@ -49,6 +49,26 @@
   #mapscan{position:absolute;left:50%;transform:translateX(-50%);bottom:34px;display:none;
     z-index:5;background:#ffd75e;border-color:#ffd75e;color:#141a23;font-weight:700;}
   #minimap.expanded #mapscan{display:block;}
+  /* real-terrain picker dialog */
+  #pickdlg{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:rgba(6,9,14,.72);}
+  #pickdlg.hidden{display:none;}
+  .pk-card{background:#141a23;border:1px solid #2a3340;border-radius:14px;padding:20px;
+    width:min(560px,94vw);max-height:92vh;overflow:auto;display:flex;flex-direction:column;gap:10px;}
+  .pk-card h3{margin:0;color:#ffd75e;letter-spacing:.12em;font-size:16px;}
+  .pk-sub{margin:0;font-size:13px;color:#9fb0c3;}
+  .pk-row{display:flex;gap:8px;align-items:center;}
+  .pk-row input{flex:1;background:#0d1219;border:1px solid #2a3340;border-radius:8px;color:#fff;
+    padding:10px 12px;font-size:15px;}
+  .pk-coords{font:600 13px ui-monospace,monospace;color:#ffd75e;}
+  #pk-map{position:relative;width:100%;height:320px;background:#0d1219;border:1px solid #2a3340;
+    border-radius:10px;overflow:hidden;touch-action:none;cursor:crosshair;}
+  #pk-map img{position:absolute;width:256px;height:256px;pointer-events:none;}
+  #pk-pin{position:absolute;left:50%;top:50%;transform:translate(-50%,-100%);font-size:28px;
+    pointer-events:none;display:none;}
+  #pk-hint{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:12px;color:#fff;
+    background:rgba(12,16,22,.6);padding:4px;pointer-events:none;}
+  .pk-status{font-size:13px;color:#9fb0c3;min-height:18px;}
   #minimap .tag{position:absolute;top:4px;left:8px;font-size:11px;letter-spacing:.1em;color:#9fb0c3;
     background:rgba(12,16,22,.7);padding:2px 6px;border-radius:4px;}
   /* help overlay */
@@ -179,6 +199,26 @@
   <button id="drop">drop repeater <span style="opacity:.6">(E)</span></button>
   <button class="ghost" id="mapbtn">map <span style="opacity:.6">(M)</span></button>
   <button class="ghost" id="newmap">new map</button>
+  <button class="ghost" id="realmap">real terrain</button>
+</div>
+<div id="pickdlg" class="hidden">
+  <div class="pk-card">
+    <h3>REAL TERRAIN</h3>
+    <p class="pk-sub">Enter a zip code, tap a spot on the OpenTopoMap, then generate a 3×3 mile map.</p>
+    <div class="pk-row">
+      <input id="pk-zip" inputmode="numeric" placeholder="zip code" maxlength="10">
+      <button id="pk-find">find</button>
+    </div>
+    <div id="pk-map"><div id="pk-pin">📍</div><div id="pk-hint">tap to pick center</div></div>
+    <div class="pk-row">
+      <span id="pk-coords" class="pk-coords">—</span>
+    </div>
+    <div class="pk-row">
+      <button id="pk-generate">generate</button>
+      <button id="pk-cancel" class="ghost">cancel</button>
+    </div>
+    <div id="pk-status" class="pk-status"></div>
+  </div>
 </div>
 <div id="minimap"><span class="tag">MAP</span><canvas id="mm" width="512" height="512"></canvas>
   <div class="cap">click to set scan target · <b>M</b> to close</div>

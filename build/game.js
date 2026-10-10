@@ -99,7 +99,7 @@ function disposeGroup(g) {
 }
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
-function buildWorld(seed) {
+function buildWorld(seed, worldOverride) {
   W.seed = seed;
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
   worldGroup = new THREE.Group();
@@ -113,8 +113,9 @@ function buildWorld(seed) {
   hideRepMenu();
   setStat('scan', '—');
 
-  const world = generateMap(seed);
+  const world = worldOverride || generateMap(seed);
   W.world = world;
+  W.mapLabel = world.real ? world.label : null;
   const { SIZE, GRID } = SIG, H = world.heights;
 
   // terrain + topo shader (hypsometric + contours + coverage + preview)
@@ -285,9 +286,14 @@ function buildWorld(seed) {
 
 function spawnPlayer() {
   const { SIZE, GRID } = SIG;
-  const t = W.world.towns[0];
-  W.player.x = t.x; W.player.z = W.world.roadZ(t.x) + 12;
-  W.player.yaw = 0; W.player.pitch = 0; // facing the town (-z)
+  if (W.world.towns.length) {
+    const t = W.world.towns[0];
+    W.player.x = t.x; W.player.z = W.world.roadZ(t.x) + 12;
+  } else {
+    // real terrain: start near the center on a gentle spot
+    W.player.x = SIZE / 2; W.player.z = SIZE / 2;
+  }
+  W.player.yaw = 0; W.player.pitch = 0;
   W.player.eyeY = sampleH(W.world.heights, GRID, SIZE, W.player.x, W.player.z) + 1.7;
 }
 
@@ -753,6 +759,11 @@ function wireUI() {
   };
   document.getElementById('rm-delete').onclick = () => { if (menuRep) deleteRepeater(menuRep); };
   document.getElementById('rm-close').onclick = hideRepMenu;
+  document.getElementById('realmap').onclick = () => {
+    document.getElementById('pickdlg').classList.remove('hidden');
+    pkRender();
+  };
+  pkInit();
   mapEl.addEventListener('click', (e) => {
     if (mapEl.classList.contains('expanded')) setWaypointFromEvent(e);
     else toggleMap(true);
@@ -958,6 +969,178 @@ function tick(t) {
 
   drawMinimap();
   renderer.render(scene, camera);
+}
+
+/* ================= real-terrain picker ================= */
+// OpenTopoMap viewer + zip geocode + Terrarium elevation -> 3x3 mile map
+const PK = { lat: 35.7357, lon: -87.1282, zoom: 11, selLat: null, selLon: null, tiles: [] };
+function pkLonLatToTile(lon, lat, z) {
+  const n = Math.pow(2, z);
+  const x = Math.floor((lon + 180) / 360 * n);
+  const latR = lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n);
+  return { x, y };
+}
+function pkTileToLonLat(x, y, z) {
+  const n = Math.pow(2, z);
+  const lon = x / n * 360 - 180;
+  const latR = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n)));
+  return { lon, lat: latR * 180 / Math.PI };
+}
+function pkRender() {
+  const el = document.getElementById('pk-map');
+  const Wpx = el.clientWidth, Hpx = el.clientHeight;
+  // center in world pixels
+  const n = Math.pow(2, PK.zoom) * 256;
+  const cx = (PK.lon + 180) / 360 * n;
+  const latR = PK.lat * Math.PI / 180;
+  const cy = (1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n;
+  // clear old tiles
+  el.querySelectorAll('img').forEach(i => i.remove());
+  const sub = ['a', 'b', 'c'];
+  let si = 0;
+  const x0 = Math.floor((cx - Wpx / 2) / 256), x1 = Math.floor((cx + Wpx / 2) / 256);
+  const y0 = Math.floor((cy - Hpx / 2) / 256), y1 = Math.floor((cy + Hpx / 2) / 256);
+  for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+    const img = document.createElement('img');
+    img.src = `https://${sub[si++ % 3]}.tile.opentopomap.org/${PK.zoom}/${tx}/${ty}.png`;
+    img.style.left = (tx * 256 - (cx - Wpx / 2)) + 'px';
+    img.style.top = (ty * 256 - (cy - Hpx / 2)) + 'px';
+    img.draggable = false;
+    el.appendChild(img);
+  }
+  // pin at selected (or center)
+  const pin = document.getElementById('pk-pin');
+  const sLat = PK.selLat !== null ? PK.selLat : PK.lat;
+  const sLon = PK.selLon !== null ? PK.selLon : PK.lon;
+  const sLatR = sLat * Math.PI / 180;
+  const sx = (sLon + 180) / 360 * n, sy = (1 - Math.log(Math.tan(sLatR) + 1 / Math.cos(sLatR)) / Math.PI) / 2 * n;
+  pin.style.display = 'block';
+  pin.style.left = (sx - (cx - Wpx / 2)) + 'px';
+  pin.style.top = (sy - (cy - Hpx / 2)) + 'px';
+  document.getElementById('pk-coords').textContent =
+    `${sLat.toFixed(5)}, ${sLon.toFixed(5)}`;
+}
+function pkInit() {
+  const el = document.getElementById('pk-map');
+  let dragging = false, sx = 0, sy = 0, moved = 0;
+  const n = () => Math.pow(2, PK.zoom) * 256;
+  el.addEventListener('pointerdown', (e) => {
+    dragging = true; moved = 0; sx = e.clientX; sy = e.clientY;
+    el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    moved += Math.abs(dx) + Math.abs(dy); sx = e.clientX; sy = e.clientY;
+    const wpp = 360 / n(); // deg lon per pixel
+    PK.lon -= dx * wpp;
+    const hpp = 170.1 / n(); // approx deg lat per pixel (web mercator)
+    PK.lat += dy * hpp;
+    PK.lat = Math.max(-85, Math.min(85, PK.lat));
+    pkRender();
+  });
+  el.addEventListener('pointerup', (e) => {
+    dragging = false;
+    if (moved < 8) { // tap: select this point
+      const r = el.getBoundingClientRect();
+      const px = e.clientX - r.left - r.width / 2, py = e.clientY - r.top - r.height / 2;
+      const wpp = 360 / n();
+      const hpp = 170.1 / n();
+      PK.selLon = PK.lon + px * wpp;
+      PK.selLat = PK.lat - py * hpp;
+      pkRender();
+    }
+  });
+  document.getElementById('pk-find').onclick = async () => {
+    const zip = document.getElementById('pk-zip').value.trim();
+    if (!zip) return;
+    pkStatus('looking up ' + zip + '…');
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(zip)}&countrycodes=us&format=json&limit=1`);
+      const j = await r.json();
+      if (!j.length) { pkStatus('zip not found'); return; }
+      PK.lat = parseFloat(j[0].lat); PK.lon = parseFloat(j[0].lon);
+      PK.selLat = PK.lat; PK.selLon = PK.lon;
+      pkRender();
+      pkStatus(j[0].display_name.split(',').slice(0, 3).join(','));
+    } catch (e) { pkStatus('lookup failed: ' + e.message); }
+  };
+  document.getElementById('pk-cancel').onclick = () => {
+    document.getElementById('pickdlg').classList.add('hidden');
+  };
+  document.getElementById('pk-generate').onclick = pkGenerate;
+}
+function pkStatus(t) { document.getElementById('pk-status').textContent = t; }
+function pkLoadImage(url) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => res(img);
+    img.onerror = rej;
+    img.src = url;
+  });
+}
+// Fetch Terrarium elevation tiles for a 3x3 mile box, resample to 256x256.
+async function pkFetchElevation(lat, lon, onProgress) {
+  const SIZE_M = 4828, Z = 13, GRID = 256;
+  const mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
+  const dLat = (SIZE_M / 2) / mPerDegLat, dLon = (SIZE_M / 2) / mPerDegLon;
+  const t0 = pkLonLatToTile(lon - dLon, lat + dLat, Z);
+  const t1 = pkLonLatToTile(lon + dLon, lat - dLat, Z);
+  const tiles = [];
+  for (let ty = t0.y; ty <= t1.y; ty++) for (let tx = t0.x; tx <= t1.x; tx++) tiles.push({ tx, ty });
+  onProgress(`fetching ${tiles.length} elevation tiles…`);
+  const tileMaps = await Promise.all(tiles.map(async ({ tx, ty }) => {
+    const img = await pkLoadImage(`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${Z}/${tx}/${ty}.png`);
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    return { tx, ty, data: g.getImageData(0, 0, 256, 256).data };
+  }));
+  onProgress('sampling terrain…');
+  const heights = new Float32Array(GRID * GRID);
+  const n = Math.pow(2, Z);
+  for (let j = 0; j < GRID; j++) {
+    for (let i = 0; i < GRID; i++) {
+      const gx = (i + 0.5) / GRID * SIZE_M - SIZE_M / 2; // m east of center
+      const gz = (j + 0.5) / GRID * SIZE_M - SIZE_M / 2; // m south of center
+      const pLat = lat - gz / mPerDegLat;
+      const pLon = lon + gx / mPerDegLon;
+      const fx = (pLon + 180) / 360 * n, fy = (1 - Math.log(Math.tan(pLat * Math.PI / 180) + 1 / Math.cos(pLat * Math.PI / 180)) / Math.PI) / 2 * n;
+      const tx = Math.floor(fx), ty = Math.floor(fy);
+      const px = Math.min(255, Math.max(0, Math.floor((fx - tx) * 256)));
+      const py = Math.min(255, Math.max(0, Math.floor((fy - ty) * 256)));
+      const t = tileMaps.find(td => td.tx === tx && td.ty === ty);
+      let elev = 0;
+      if (t) {
+        const k = (py * 256 + px) * 4;
+        elev = t.data[k] * 256 + t.data[k + 1] + t.data[k + 2] / 256 - 32768;
+      }
+      heights[j * GRID + i] = elev;
+    }
+    if ((j & 31) === 0) await new Promise(r => setTimeout(r, 0)); // keep UI alive
+  }
+  return heights;
+}
+async function pkGenerate() {
+  const lat = PK.selLat !== null ? PK.selLat : PK.lat;
+  const lon = PK.selLon !== null ? PK.selLon : PK.lon;
+  const btn = document.getElementById('pk-generate');
+  btn.disabled = true;
+  try {
+    const heights = await pkFetchElevation(lat, lon, pkStatus);
+    pkStatus('building map…');
+    await new Promise(r => setTimeout(r, 30));
+    const label = `real terrain ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+    const world = generateRealMap(heights, (Math.random() * 1e9) | 0, label);
+    document.getElementById('pickdlg').classList.add('hidden');
+    buildWorld((Math.random() * 1e9) | 0, world);
+    showToast('real terrain loaded: ' + label);
+  } catch (e) {
+    pkStatus('failed: ' + e.message);
+  }
+  btn.disabled = false;
 }
 
 window.__sig = { W, buildWorld, dropRepeater, runMapScan, toggleMap, showRepMenu, hideRepMenu, deleteRepeater };

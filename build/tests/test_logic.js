@@ -43,9 +43,10 @@ ok(w1.towns[0].name !== w1.towns[1].name, 'town names differ');
 // road is smooth along its length (no bucking)
 {
   let prev = null, jumps = 0;
-  for (let x = 60; x < SIG.SIZE - 40; x += 8) {
+  const step = Math.max(8, SIG.SIZE / SIG.GRID); // don't sample finer than the grid
+  for (let x = 60; x < SIG.SIZE - 40; x += step) {
     const h = L.sampleH(w1.heights, SIG.GRID, SIG.SIZE, x, w1.roadZ(x));
-    if (prev !== null && Math.abs(h - prev) > 6) jumps++;
+    if (prev !== null && Math.abs(h - prev) > 6 * (step / 8)) jumps++;
     prev = h;
   }
   ok(jumps < 4, `road smooth (${jumps} jumps)`);
@@ -167,7 +168,8 @@ ok(new Set(people.map(p => p.hash)).size === people.length, 'hashes unique');
   ok(far2 > 0.5, `1200m LOS link stays strong (${far2.toFixed(3)})`);
   // ...but trees are the real enemy
   const forest = new Uint8Array(SIG.TREE_GRID * SIG.TREE_GRID);
-  for (let ix = 0; ix < SIG.TREE_GRID; ix++) forest[64 * SIG.TREE_GRID + ix] = 4;
+  const frow = Math.floor(1600 / SIG.SIZE * SIG.TREE_GRID); // tree row at z=1600
+  for (let ix = 0; ix < SIG.TREE_GRID; ix++) forest[frow * SIG.TREE_GRID + ix] = 4;
   const thru = L.linkStrength(flat, SIG.GRID, SIG.SIZE, forest, 100, 1600, 10, 700, 1600, 10);
   const clear = L.linkStrength(flat, SIG.GRID, SIG.SIZE, trees, 100, 1600, 10, 700, 1600, 10);
   ok(thru < clear * 0.5, `600m of forest weakens link (${thru.toFixed(3)} < ${clear.toFixed(3)})`);

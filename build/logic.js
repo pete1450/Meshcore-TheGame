@@ -5,7 +5,7 @@
 'use strict';
 
 const SIG = {
-  SIZE: 3200,          // world extent (m) — 10x the area of v1
+  SIZE: 4828,          // world extent (m) — 3x3 miles
   GRID: 256,           // heightfield resolution (logic)
   TREE_GRID: 128,      // tree-count grid used for foliage attenuation
   MAX_RANGE: 1300,     // sweep stops here (m)
@@ -224,8 +224,9 @@ function generateMap(seed) {
       const x = (ix / (GRID - 1)) * SIZE, z = (iz / (GRID - 1)) * SIZE;
       if (x < 8 || x > SIZE - 8) continue;
       const d = Math.abs(z - roadZ(x));
-      if (d < 20) {
-        const w = 1 - smoothstep(8, 20, d);
+      const hw = 20 * (SIZE / 3200); // scale road width with map size
+      if (d < hw) {
+        const w = 1 - smoothstep(hw * 0.4, hw, d);
         const i = iz * GRID + ix;
         raw[i] = raw[i] * (1 - w) + prof[ix] * w;
       }
@@ -254,6 +255,41 @@ function generateMap(seed) {
   }
 
   return { heights: raw, towns, roadZ, townDist, roadDist, forestDensity, forestClass, noise: nz, rng };
+}
+
+// Real-terrain map: heights is a Float32Array(GRID*GRID) of real elevations (m).
+// No procedural towns/roads; forest is applied procedurally via noise patches.
+function generateRealMap(heights, seed, label) {
+  const { SIZE, GRID } = SIG;
+  const rng = mulberry32(seed);
+  const nz = new ValueNoise(seed ^ 0x9e3779b9);
+  const raw = heights; // use directly
+
+  const townDist = () => Infinity;
+  const roadDist = () => Infinity;
+  const roadZ = () => SIZE / 2;
+
+  function forestPatch(x, z) {
+    return (nz.fbm(x * 0.0011 + 4.7, z * 0.0011 - 8.2, 2) + 1) / 2;
+  }
+  function forestClass(x, z) {
+    const p = forestPatch(x, z);
+    return p > 0.60 ? 2 : p > 0.47 ? 1 : 0;
+  }
+  function forestDensity(x, z) {
+    // no town/road/treeline exclusions — pure procedural patches on real terrain
+    const detail = (nz.fbm(x * 0.006 + 11.2, z * 0.006 - 5.4, 3) + 1) / 2;
+    const c = forestClass(x, z);
+    if (c === 2) return 0.72 + 0.28 * detail;
+    if (c === 1) return 0.30 + 0.30 * detail;
+    return 0.06 + 0.14 * detail;
+  }
+
+  return {
+    heights: raw, towns: [], roadZ, townDist, roadDist,
+    forestDensity, forestClass, noise: nz, rng,
+    real: true, label: label || 'real terrain',
+  };
 }
 
 function placeBuildings(world, count) {
@@ -412,6 +448,7 @@ function linkStrength(h, grid, size, treeGrid, ax, az, ah, bx, bz, bh) {
   const hA = sampleH(h, grid, size, ax, az) + ah;
   const hB = sampleH(h, grid, size, bx, bz) + bh;
   let slopeMax = -Infinity, atten = 1;
+  const seenCells = new Set(); // each tree cell counts once
   const steps = Math.max(1, Math.floor(dist / 4));
   for (let i = 1; i < steps; i++) {
     const f = i / steps, d = f * dist;
@@ -419,8 +456,13 @@ function linkStrength(h, grid, size, treeGrid, ax, az, ah, bx, bz, bh) {
     const e = sampleH(h, grid, size, x, z);
     // canopy gate: trees only attenuate where the segment runs within
     // CANOPY_H of the ground — a ray flying high over a valley ignores it
-    if (hA + (hB - hA) * f - e < CANOPY_H)
-      atten *= Math.exp(-TREE_K * treeCountAt(treeGrid, size, x, z) * 0.5);
+    if (hA + (hB - hA) * f - e < CANOPY_H) {
+      const ci = treeCellAt(treeGrid, size, x, z);
+      if (!seenCells.has(ci)) {
+        seenCells.add(ci);
+        atten *= Math.exp(-TREE_K * treeGrid[ci] * 0.5);
+      }
+    }
     const sMid = (e - hA) / d;
     if (sMid > slopeMax) slopeMax = sMid;
     if (atten < 0.005) break;
@@ -444,5 +486,5 @@ function sampleCov(cov, size, grid, x, z) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { SIG, mulberry32, ValueNoise, generateMap, placeBuildings, placePeople, sampleH, sweepCoverage, sampleCov, linkStrength, nodeHash, smoothstep, clamp01 };
+  module.exports = { SIG, mulberry32, ValueNoise, generateMap, generateRealMap, placeBuildings, placePeople, sampleH, sweepCoverage, sampleCov, linkStrength, nodeHash, smoothstep, clamp01 };
 }
