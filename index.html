@@ -1240,19 +1240,76 @@ function buildWorld(seed, worldOverride) {
   W.people = placePeople(world, seed);
   W.playerHash = nodeHash(seed, 7);
   document.getElementById('mynode').textContent = W.playerHash.slice(0, 4).toUpperCase();
+  const skinTones = [0xe8b98a, 0xd4a06a, 0xb87e4a, 0x8a5a32, 0xf0c8a0];
+  const shirtColors = [0x4a7ac8, 0xc84a4a, 0x4ac86a, 0xc8a44a, 0x8a4ac8, 0x4ac8c0, 0xe07a3a];
+  const pantsColors = [0x3a4a5a, 0x5a4a3a, 0x2a3a4a, 0x4a5a3a];
   for (const p of W.people) {
     const g = new THREE.Group();
     const gy = sampleH(H, GRID, SIZE, p.x, p.z);
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.0, 1.5, 8), new THREE.MeshLambertMaterial({ color: 0xff5533 }));
-    body.position.y = 0.75;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.37, 8, 8), new THREE.MeshLambertMaterial({ color: 0xe8b98a }));
-    head.position.y = 1.8;
+    const prng = mulberry32(p.hash.charCodeAt(0) * 7919 + p.hash.charCodeAt(1));
+    const skin = skinTones[(prng() * skinTones.length) | 0];
+    const shirt = shirtColors[(prng() * shirtColors.length) | 0];
+    const pants = pantsColors[(prng() * pantsColors.length) | 0];
+    const skinMat = new THREE.MeshLambertMaterial({ color: skin });
+    const shirtMat = new THREE.MeshLambertMaterial({ color: shirt });
+    const pantsMat = new THREE.MeshLambertMaterial({ color: pants });
+    
+    // legs (two stubby cylinders)
+    for (const sx of [-0.14, 0.14]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.5, 8), pantsMat);
+      leg.position.set(sx, 0.25, 0);
+      g.add(leg);
+      // shoe
+      const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.3),
+        new THREE.MeshLambertMaterial({ color: 0x2a2018 }));
+      shoe.position.set(sx, 0.06, 0.05);
+      g.add(shoe);
+    }
+    // body: tapered cylinder (shirt)
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.36, 0.75, 10), shirtMat);
+    body.position.y = 0.875;
+    g.add(body);
+    // arms
+    for (const sx of [-0.42, 0.42]) {
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.6, 8), shirtMat);
+      arm.position.set(sx, 0.9, 0);
+      arm.rotation.z = sx > 0 ? -0.15 : 0.15;
+      g.add(arm);
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), skinMat);
+      hand.position.set(sx * 1.05, 0.58, 0);
+      g.add(hand);
+    }
+    // big cartoony head
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 14, 12), skinMat);
+    head.position.y = 1.62;
+    head.scale.y = 1.1;
+    g.add(head);
+    // eyes (white + pupils, facing +z)
+    for (const sx of [-0.13, 0.13]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8),
+        new THREE.MeshLambertMaterial({ color: 0xffffff }));
+      eye.position.set(sx, 1.68, 0.3);
+      g.add(eye);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.032, 8, 8),
+        new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
+      pupil.position.set(sx, 1.68, 0.355);
+      g.add(pupil);
+    }
+    // hair cap (half-sphere, random dark color)
+    const hairColors = [0x2a1a0a, 0x4a2a0a, 0x1a1a1a, 0x6a4a2a, 0x8a8a8a];
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.375, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      new THREE.MeshLambertMaterial({ color: hairColors[(prng() * hairColors.length) | 0] }));
+    hair.position.y = 1.66;
+    g.add(hair);
+    // random yaw so they don't all face the same way
+    g.rotation.y = prng() * Math.PI * 2;
+    
     const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.6, 24), new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.6;
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 46, 6, 1, true),
       new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }));
     pillar.position.y = 23;
-    g.add(body, head, ring, pillar);
+    g.add(ring, pillar);
     g.position.set(p.x, gy, p.z);
     g.userData = { body, ring, pillar, person: p, reached: false, flashUntil: 0 };
     worldGroup.add(g);
