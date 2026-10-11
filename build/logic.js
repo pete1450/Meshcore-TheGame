@@ -8,10 +8,10 @@ const SIG = {
   SIZE: 4828,          // world extent (m) — 3x3 miles
   GRID: 256,           // heightfield resolution (logic)
   TREE_GRID: 128,      // tree-count grid used for foliage attenuation
-  MAX_RANGE: 1300,     // sweep range for map scans (m)
+  MAX_RANGE: 5000,     // sweep range for map scans (m) — full map width
   LINK_RANGE: 5000,    // max range for person/repeater links (m) — full map width
   RAY_STEP: 4,         // march step along each ray (m)
-  RAY_COUNT: 720,      // 0.5-degree rays
+  RAY_COUNT: 1440,     // 0.25-degree rays (denser for long-range coverage)
   RX_H: 1.7,           // receiver height above ground (head/handheld, m)
   DECAY: 3000,         // very gentle distance falloff: clear LOS reaches, period
   NLOS_RANGE: 300,     // how far past the first blockage NLOS can still reach (m)
