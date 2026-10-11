@@ -191,7 +191,7 @@ function buildWorld(seed, worldOverride) {
         const h1 = sampleH(H, GRID, SIZE, p.x + nx, p.z + nz2) + 1.2;
         const h2 = sampleH(H, GRID, SIZE, p.x - nx, p.z - nz2) + 1.2;
         vp.push(p.x + nx, h1, p.z + nz2, p.x - nx, h2, p.z - nz2);
-        if (i > 0) { const b = i * 2; idx.push(b - 2, b - 1, b, b - 1, b + 1, b); }
+        if (i > 0) { const b = i * 2; idx.push(b - 2, b, b - 1, b - 1, b, b + 1); }
       }
       const rg = new THREE.BufferGeometry();
       rg.setAttribute('position', new THREE.Float32BufferAttribute(vp, 3));
@@ -550,6 +550,18 @@ function drawMinimap() {
   const S = 512, k = S / SIG.SIZE;
   mmCtx.clearRect(0, 0, S, S);
   mmCtx.drawImage(mmBase, 0, 0, S, S);
+  // real OSM roads
+  if (W.world.roads && W.world.roads.length) {
+    mmCtx.strokeStyle = '#3a3a3a'; mmCtx.lineWidth = 2; mmCtx.lineCap = 'round';
+    for (const road of W.world.roads) {
+      mmCtx.beginPath();
+      road.pts.forEach((p, i) => {
+        const x = p.x * k, z = p.z * k;
+        if (i === 0) mmCtx.moveTo(x, z); else mmCtx.lineTo(x, z);
+      });
+      mmCtx.stroke();
+    }
+  }
   if (W.scan) {
     mmCtx.globalAlpha = 0.85;
     mmCtx.drawImage(scanCanvas, 0, 0, S, S);
