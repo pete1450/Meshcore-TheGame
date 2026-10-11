@@ -428,10 +428,10 @@ function buildWorld(seed, worldOverride) {
     for (const sx of [-0.42, 0.42]) {
       const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.6, 8), shirtMat);
       arm.position.set(sx, 0.9, 0);
-      arm.rotation.z = sx > 0 ? -0.15 : 0.15;
+      arm.rotation.z = sx > 0 ? 0.08 : -0.08; // tops tilt slightly inward
       g.add(arm);
       const hand = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), skinMat);
-      hand.position.set(sx * 1.05, 0.58, 0);
+      hand.position.set(sx * 1.02, 0.58, 0);
       g.add(hand);
     }
     // big cartoony head
