@@ -218,6 +218,90 @@ function buildRibbon(pts, halfW, mat, H) {
   return new THREE.Mesh(rg, mat);
 }
 
+// Pick which side of an open shoreline is water by sampling elevation.
+// Returns the water polygon points, or null.
+function pickWaterSide(poly, H) {
+  const { SIZE, GRID } = SIG;
+  const ring = poly.pts, ef = poly.ef, el = poly.el;
+  if (!ef || !el) return null;
+  
+  // Build two candidate polygons by closing along bbox edge in both directions
+  const buildCandidate = (clockwise) => {
+    const pts = [];
+    // shoreline from start to end
+    for (const p of ring) pts.push(p);
+    // from end to el (already at edge)
+    pts.push({ x: el.x, z: el.z });
+    // walk bbox edge from el to ef
+    // corners: 0=(0,0), 1=(S,0), 2=(S,S), 3=(0,S)
+    const corners = [{x:0,z:0},{x:SIZE,z:0},{x:SIZE,z:SIZE},{x:0,z:SIZE}];
+    // determine edge indices
+    const edgeIdx = (e) => {
+      if (e.x === 0) return 3; // west edge, between corners 3-0
+      if (e.x === SIZE) return 1; // east edge, between 1-2
+      if (e.z === 0) return 0; // north edge, between 0-1
+      return 2; // south edge, between 2-3
+    };
+    let ei = edgeIdx(ef), li = edgeIdx(el);
+    // walk from li to ei
+    if (clockwise) {
+      let i = li;
+      while (i !== ei) {
+        i = (i + 1) % 4;
+        pts.push(corners[i]);
+      }
+    } else {
+      let i = li;
+      while (i !== ei) {
+        i = (i + 3) % 4;
+        pts.push(corners[(i + 1) % 4]);
+      }
+    }
+    pts.push({ x: ef.x, z: ef.z });
+    return pts;
+  };
+  
+  const cand1 = buildCandidate(true);
+  const cand2 = buildCandidate(false);
+  
+  // point in polygon (ray casting)
+  const inPoly = (x, z, p) => {
+    let inside = false;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      const xi = p[i].x, zi = p[i].z, xj = p[j].x, zj = p[j].z;
+      if (((zi > z) !== (zj > z)) && (x < (xj - xi) * (z - zi) / (zj - zi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+  
+  // sample mean elevation inside each candidate
+  const meanElev = (p) => {
+    let sum = 0, n = 0;
+    // bbox of polygon
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const pt of p) {
+      x0 = Math.min(x0, pt.x); x1 = Math.max(x1, pt.x);
+      z0 = Math.min(z0, pt.z); z1 = Math.max(z1, pt.z);
+    }
+    for (let x = x0 + 50; x < x1; x += 100) {
+      for (let z = z0 + 50; z < z1; z += 100) {
+        if (inPoly(x, z, p)) {
+          sum += sampleH(H, GRID, SIZE, x, z);
+          n++;
+        }
+      }
+    }
+    return n > 0 ? sum / n : Infinity;
+  };
+  
+  const m1 = meanElev(cand1), m2 = meanElev(cand2);
+  // water is lower
+  if (m1 === Infinity && m2 === Infinity) return null;
+  return m1 < m2 ? cand1 : cand2;
+}
+
 function buildWorld(seed, worldOverride) {
   W.seed = seed;
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
@@ -374,6 +458,27 @@ function buildWorld(seed, worldOverride) {
     for (const w of world.waterWays || []) {
       const m = buildRibbon(w.pts, w.w / 2, osmWaterMat, H);
       if (m) worldGroup.add(m);
+    }
+    // open shorelines: pick water side by elevation, render it
+    for (const poly of world.waterPolys || []) {
+      if (!poly.open) continue;
+      const waterPoly = pickWaterSide(poly, H);
+      if (!waterPoly) continue;
+      // render as polygon
+      let cx = 0, cz = 0;
+      for (const p of waterPoly) { cx += p.x; cz += p.z; }
+      cx /= waterPoly.length; cz /= waterPoly.length;
+      const shape = new THREE.Shape();
+      shape.moveTo(waterPoly[0].x - cx, -(waterPoly[0].z - cz));
+      for (let i = 1; i < waterPoly.length; i++) shape.lineTo(waterPoly[i].x - cx, -(waterPoly[i].z - cz));
+      shape.closePath();
+      const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), osmWaterMat);
+      m.rotation.x = -Math.PI / 2;
+      let hy = 0;
+      for (const p of waterPoly) hy += sampleH(H, GRID, SIZE, p.x, p.z);
+      hy = hy / waterPoly.length + 0.5;
+      m.position.set(cx, hy, cz);
+      worldGroup.add(m);
     }
   }
 
@@ -1487,6 +1592,23 @@ async function pkFetchTexture(lat, lon, onProgress) {
   return canvas;
 }
 // Fetch real roads from OpenStreetMap main API for the 3x3 mile box.
+// Close an open shoreline polyline. Returns {pts, open:true, ef, el}.
+// The water side is determined at render time by pickWaterSide.
+function closeShoreline(ring, size) {
+  if (ring.length < 2) return [];
+  const f = ring[0], l = ring[ring.length - 1];
+  const edgePt = (p) => {
+    const dx0 = p.x, dx1 = size - p.x, dz0 = p.z, dz1 = size - p.z;
+    const m = Math.min(dx0, dx1, dz0, dz1);
+    if (m === dx0) return { x: 0, z: p.z };
+    if (m === dx1) return { x: size, z: p.z };
+    if (m === dz0) return { x: p.x, z: 0 };
+    return { x: p.x, z: size };
+  };
+  const ef = edgePt(f), el = edgePt(l);
+  return [{ pts: ring, open: true, ef, el }];
+}
+
 async function pkFetchRoads(lat, lon, onProgress) {
   const SIZE_M = 4828;
   const mPerDegLat = 111320, mPerDegLon = 111320 * Math.cos(lat * Math.PI / 180);
@@ -1609,6 +1731,10 @@ async function pkFetchRoads(lat, lon, onProgress) {
         const f = ring[0], l = ring[ring.length - 1];
         if (Math.hypot(f.x - l.x, f.z - l.z) < 50) {
           waterPolys.push({ pts: ring });
+        } else {
+          // open shoreline: close along bbox edge, pick water side by elevation
+          const closed = closeShoreline(ring, SIZE_M);
+          for (const c of closed) waterPolys.push(c);
         }
       }
     }
