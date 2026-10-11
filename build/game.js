@@ -195,6 +195,29 @@ function buildWorkshop(b, H) {
   return { group, walls, benchPos: { x: cx, z: cz + 3.5, y: gy + 1.0 }, computer: comp, boxes, cx, cz, gy };
 }
 
+// Build a terrain-following ribbon mesh from a polyline.
+// pts: [{x, z}], halfW: half-width in meters, mat: material, H: heights.
+function buildRibbon(pts, halfW, mat, H) {
+  const { SIZE, GRID } = SIG;
+  if (pts.length < 2) return null;
+  const vp = [], idx = [];
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const q = pts[Math.min(pts.length - 1, i + 1)], o = pts[Math.max(0, i - 1)];
+    let dx = q.x - o.x, dz = q.z - o.z;
+    const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
+    const nx = -dz * halfW, nz2 = dx * halfW;
+    const h1 = sampleH(H, GRID, SIZE, p.x + nx, p.z + nz2) + 0.1;
+    const h2 = sampleH(H, GRID, SIZE, p.x - nx, p.z - nz2) + 0.1;
+    vp.push(p.x + nx, h1, p.z + nz2, p.x - nx, h2, p.z - nz2);
+    if (i > 0) { const b = i * 2; idx.push(b - 2, b, b - 1, b - 1, b, b + 1); }
+  }
+  const rg = new THREE.BufferGeometry();
+  rg.setAttribute('position', new THREE.Float32BufferAttribute(vp, 3));
+  rg.setIndex(idx); rg.computeVertexNormals();
+  return new THREE.Mesh(rg, mat);
+}
+
 function buildWorld(seed, worldOverride) {
   W.seed = seed;
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
@@ -275,25 +298,8 @@ function buildWorld(seed, worldOverride) {
   if (world.roads && world.roads.length) {
     const roadMat = new THREE.MeshLambertMaterial({ color: 0x2e2c28, polygonOffset: true, polygonOffsetFactor: -2 });
     for (const road of world.roads) {
-      const pts = road.pts, w = road.w / 2;
-      if (pts.length < 2) continue;
-      const vp = [], idx = [];
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i];
-        const q = pts[Math.min(pts.length - 1, i + 1)], o = pts[Math.max(0, i - 1)];
-        let dx = q.x - o.x, dz = q.z - o.z;
-        const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
-        const nx = -dz * w, nz2 = dx * w;
-        const h1 = sampleH(H, GRID, SIZE, p.x + nx, p.z + nz2) + 0.1;
-        const h2 = sampleH(H, GRID, SIZE, p.x - nx, p.z - nz2) + 0.1;
-        vp.push(p.x + nx, h1, p.z + nz2, p.x - nx, h2, p.z - nz2);
-        if (i > 0) { const b = i * 2; idx.push(b - 2, b, b - 1, b - 1, b, b + 1); }
-      }
-      const rg = new THREE.BufferGeometry();
-      rg.setAttribute('position', new THREE.Float32BufferAttribute(vp, 3));
-      rg.setIndex(idx); rg.computeVertexNormals();
-      worldGroup.add(new THREE.Mesh(rg, roadMat));
-      W.roadMeshCount++;
+      const m = buildRibbon(road.pts, road.w / 2, roadMat, H);
+      if (m) { worldGroup.add(m); W.roadMeshCount++; }
     }
   }
 
@@ -329,7 +335,7 @@ function buildWorld(seed, worldOverride) {
     worldGroup.add(ws.group);
   }
 
-  // water ponds
+  // water ponds (procedural)
   if (world.waters) {
     const waterMat = new THREE.MeshLambertMaterial({
       color: 0x2a6ab0, transparent: true, opacity: 0.75,
@@ -339,6 +345,35 @@ function buildWorld(seed, worldOverride) {
       m.rotation.x = -Math.PI / 2;
       m.position.set(w.x, w.y, w.z);
       worldGroup.add(m);
+    }
+  }
+  // OSM water (real terrain): lakes/polygons + rivers/ways
+  if (world.waterPolys || world.waterWays) {
+    const osmWaterMat = new THREE.MeshLambertMaterial({
+      color: 0x2a6ab0, transparent: true, opacity: 0.8,
+    });
+    for (const poly of world.waterPolys || []) {
+      if (poly.pts.length < 3) continue;
+      // centroid for local coords
+      let cx = 0, cz = 0;
+      for (const p of poly.pts) { cx += p.x; cz += p.z; }
+      cx /= poly.pts.length; cz /= poly.pts.length;
+      const shape = new THREE.Shape();
+      shape.moveTo(poly.pts[0].x - cx, -(poly.pts[0].z - cz));
+      for (let i = 1; i < poly.pts.length; i++) shape.lineTo(poly.pts[i].x - cx, -(poly.pts[i].z - cz));
+      shape.closePath();
+      const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), osmWaterMat);
+      m.rotation.x = -Math.PI / 2;
+      let hy = 0;
+      for (const p of poly.pts) hy += sampleH(H, GRID, SIZE, p.x, p.z);
+      hy = hy / poly.pts.length + 0.5;
+      m.position.set(cx, hy, cz);
+      worldGroup.add(m);
+    }
+    // rivers as ribbons (like roads)
+    for (const w of world.waterWays || []) {
+      const m = buildRibbon(w.pts, w.w / 2, osmWaterMat, H);
+      if (m) worldGroup.add(m);
     }
   }
 
@@ -1483,16 +1518,19 @@ async function pkFetchRoads(lat, lon, onProgress) {
     const widthFor = (t) => t === 'motorway' ? 14 : t === 'trunk' ? 11 : t === 'primary' ? 9 : t === 'secondary' ? 8 : 6;
     const okHwy = /^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service)$/;
     const roads = [];
+    const waterPolys = []; // {pts} for natural=water
+    const waterWays = [];  // {pts, w} for waterway=*
     const wayEls = doc.getElementsByTagName('way');
     dbg.step = 'ways'; dbg.wayCount = wayEls.length;
     let hwyWays = 0;
     for (const w of wayEls) {
-      let hwy = null;
+      let hwy = null, natural = null, waterway = null;
       for (const t of w.getElementsByTagName('tag')) {
-        if (t.getAttribute('k') === 'highway') hwy = t.getAttribute('v');
+        const k = t.getAttribute('k'), v = t.getAttribute('v');
+        if (k === 'highway') hwy = v;
+        else if (k === 'natural') natural = v;
+        else if (k === 'waterway') waterway = v;
       }
-      if (!hwy || !okHwy.test(hwy)) continue;
-      hwyWays++;
       const pts = [];
       for (const nd of w.getElementsByTagName('nd')) {
         const n = nodes[nd.getAttribute('ref')];
@@ -1502,7 +1540,19 @@ async function pkFetchRoads(lat, lon, onProgress) {
           z: (lat - n.lat) * mPerDegLat + SIZE_M / 2,
         });
       }
-      if (pts.length >= 2) roads.push({ pts, w: widthFor(hwy) });
+      if (hwy && okHwy.test(hwy)) {
+        hwyWays++;
+        if (pts.length >= 2) roads.push({ pts, w: widthFor(hwy) });
+      } else if (natural === 'water' && pts.length >= 3) {
+        // closed polygon? (first ~= last)
+        const f = pts[0], l = pts[pts.length - 1];
+        if (Math.hypot(f.x - l.x, f.z - l.z) < 5) {
+          waterPolys.push({ pts: pts.slice(0, -1) }); // drop duplicate last
+        }
+      } else if (waterway && /^(river|stream|canal)$/.test(waterway) && pts.length >= 2) {
+        const w = waterway === 'river' ? 8 : waterway === 'canal' ? 6 : 3;
+        waterWays.push({ pts, w });
+      }
     }
     dbg.step = 'done'; dbg.hwyWays = hwyWays; dbg.roadCount = roads.length;
     // clip to map bounds: drop points far outside, split ways at gaps
@@ -1519,8 +1569,24 @@ async function pkFetchRoads(lat, lon, onProgress) {
       if (seg.length >= 2) clipped.push({ pts: seg, w: r.w });
     }
     dbg.clippedCount = clipped.length;
-    onProgress(`found ${clipped.length} roads (${dbg.nodeCount} nodes, ${dbg.wayCount} ways)`);
-    return clipped;
+    // clip water: polygons (keep if any point in bounds), ways (split like roads)
+    const clippedPolys = waterPolys.filter(poly =>
+      poly.pts.some(p => p.x >= -50 && p.x <= SIZE_M + 50 && p.z >= -50 && p.z <= SIZE_M + 50));
+    const clippedWays = [];
+    for (const r of waterWays) {
+      let seg = [];
+      for (const p of r.pts) {
+        if (p.x >= -50 && p.x <= SIZE_M + 50 && p.z >= -50 && p.z <= SIZE_M + 50) {
+          seg.push(p);
+        } else if (seg.length >= 2) {
+          clippedWays.push({ pts: seg, w: r.w }); seg = [];
+        } else seg = [];
+      }
+      if (seg.length >= 2) clippedWays.push({ pts: seg, w: r.w });
+    }
+    dbg.waterPolys = clippedPolys.length; dbg.waterWays = clippedWays.length;
+    onProgress(`found ${clipped.length} roads, ${clippedPolys.length} water bodies, ${clippedWays.length} waterways (${dbg.nodeCount} nodes, ${dbg.wayCount} ways)`);
+    return { roads: clipped, waterPolys: clippedPolys, waterWays: clippedWays };
   } catch (e) {
     dbg.step = 'error'; dbg.error = e.message;
     throw e;
@@ -1536,14 +1602,16 @@ async function pkGenerate() {
     const heights = await pkFetchElevation(lat, lon, pkStatus);
     let texCanvas = null;
     if (useTex) texCanvas = await pkFetchTexture(lat, lon, pkStatus);
-    let roads = [];
-    try { roads = await pkFetchRoads(lat, lon, pkStatus); }
+    let roadData = { roads: [], waterPolys: [], waterWays: [] };
+    try { roadData = await pkFetchRoads(lat, lon, pkStatus); }
     catch (e) { pkStatus('roads unavailable, continuing…'); }
     pkStatus('building map…');
     await new Promise(r => setTimeout(r, 30));
     const label = `real terrain ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
     const world = generateRealMap(heights, (Math.random() * 1e9) | 0, label);
-    world.roads = roads;
+    world.roads = roadData.roads || roadData; // back-compat if old format
+    world.waterPolys = roadData.waterPolys || [];
+    world.waterWays = roadData.waterWays || [];
     if (useTex) {
       world.groundTexture = texCanvas;
       world.noForest = true;

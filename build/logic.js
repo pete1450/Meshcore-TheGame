@@ -374,7 +374,7 @@ function generateRealMap(heights, seed, label) {
     heights: raw, towns: [], roadZ, townDist, roadDist,
     forestDensity, forestClass, noise: nz, rng,
     real: true, label: label || 'real terrain',
-    waters: findPonds(raw, seed, { townDist: () => Infinity, roadDist: () => Infinity }),
+    waters: [], // real water comes from OSM, not procedural ponds
   };
 }
 
