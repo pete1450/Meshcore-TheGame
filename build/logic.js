@@ -376,16 +376,6 @@ function generateRealMap(heights, seed, label) {
     real: true, label: label || 'real terrain',
     waters: [], // real water comes from OSM, not procedural ponds
   };
-  // large water body detection (e.g., Great Lakes): big flat area at low elevation
-  {
-    let min = Infinity;
-    for (let i = 0; i < raw.length; i++) if (raw[i] < min) min = raw[i];
-    let flatCount = 0;
-    for (let i = 0; i < raw.length; i++) if (raw[i] < min + 2) flatCount++;
-    if (flatCount / raw.length > 0.2) {
-      world.waterLevel = min + 0.5;
-    }
-  }
   return world;
 }
 

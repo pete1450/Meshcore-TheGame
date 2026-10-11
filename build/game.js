@@ -348,17 +348,10 @@ function buildWorld(seed, worldOverride) {
     }
   }
   // OSM water (real terrain): lakes/polygons + rivers/ways
-  if (world.waterPolys || world.waterWays || world.waterLevel !== undefined) {
+  if (world.waterPolys || world.waterWays) {
     const osmWaterMat = new THREE.MeshLambertMaterial({
       color: 0x2a6ab0, transparent: true, opacity: 0.8,
     });
-    // large water body (e.g., Great Lake): single plane at water level
-    if (world.waterLevel !== undefined) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(SIG.SIZE, SIG.SIZE), osmWaterMat);
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(SIG.SIZE / 2, world.waterLevel, SIG.SIZE / 2);
-      worldGroup.add(m);
-    }
     for (const poly of world.waterPolys || []) {
       if (poly.pts.length < 3) continue;
       // centroid for local coords

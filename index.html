@@ -659,16 +659,6 @@ function generateRealMap(heights, seed, label) {
     real: true, label: label || 'real terrain',
     waters: [], // real water comes from OSM, not procedural ponds
   };
-  // large water body detection (e.g., Great Lakes): big flat area at low elevation
-  {
-    let min = Infinity;
-    for (let i = 0; i < raw.length; i++) if (raw[i] < min) min = raw[i];
-    let flatCount = 0;
-    for (let i = 0; i < raw.length; i++) if (raw[i] < min + 2) flatCount++;
-    if (flatCount / raw.length > 0.2) {
-      world.waterLevel = min + 0.5;
-    }
-  }
   return world;
 }
 
@@ -1256,17 +1246,10 @@ function buildWorld(seed, worldOverride) {
     }
   }
   // OSM water (real terrain): lakes/polygons + rivers/ways
-  if (world.waterPolys || world.waterWays || world.waterLevel !== undefined) {
+  if (world.waterPolys || world.waterWays) {
     const osmWaterMat = new THREE.MeshLambertMaterial({
       color: 0x2a6ab0, transparent: true, opacity: 0.8,
     });
-    // large water body (e.g., Great Lake): single plane at water level
-    if (world.waterLevel !== undefined) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(SIG.SIZE, SIG.SIZE), osmWaterMat);
-      m.rotation.x = -Math.PI / 2;
-      m.position.set(SIG.SIZE / 2, world.waterLevel, SIG.SIZE / 2);
-      worldGroup.add(m);
-    }
     for (const poly of world.waterPolys || []) {
       if (poly.pts.length < 3) continue;
       // centroid for local coords
