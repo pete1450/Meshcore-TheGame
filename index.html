@@ -939,8 +939,8 @@ function buildWorld(seed, worldOverride) {
         let dx = q.x - o.x, dz = q.z - o.z;
         const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
         const nx = -dz * w, nz2 = dx * w;
-        const h1 = sampleH(H, GRID, SIZE, p.x + nx, p.z + nz2) + 0.3;
-        const h2 = sampleH(H, GRID, SIZE, p.x - nx, p.z - nz2) + 0.3;
+        const h1 = sampleH(H, GRID, SIZE, p.x + nx, p.z + nz2) + 0.1;
+        const h2 = sampleH(H, GRID, SIZE, p.x - nx, p.z - nz2) + 0.1;
         vp.push(p.x + nx, h1, p.z + nz2, p.x - nx, h2, p.z - nz2);
         if (i > 0) { const b = i * 2; idx.push(b - 2, b, b - 1, b - 1, b, b + 1); }
       }
