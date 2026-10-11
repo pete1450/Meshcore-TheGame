@@ -485,6 +485,51 @@ function buildWorld(seed, worldOverride) {
   // forest: jittered grid placement (scales to the big map), fills tree-count grid.
   // Trunks + canopies, up to 3x taller than before, sizes skewed toward large.
   const treeGrid = new Uint8Array(SIG.TREE_GRID * SIG.TREE_GRID);
+  // water mask: no trees in water
+  const isWater = (() => {
+    // pre-resolve open shorelines to water polygons
+    const waterPolys = [];
+    for (const p of world.waterPolys || []) {
+      if (p.open) {
+        const wp = pickWaterSide(p, H);
+        if (wp) waterPolys.push(wp);
+      } else {
+        waterPolys.push(p.pts);
+      }
+    }
+    const inPoly = (x, z, pts) => {
+      let inside = false;
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+        const xi = pts[i].x, zi = pts[i].z, xj = pts[j].x, zj = pts[j].z;
+        if (((zi > z) !== (zj > z)) && (x < (xj - xi) * (z - zi) / (zj - zi) + xi)) inside = !inside;
+      }
+      return inside;
+    };
+    const distToSeg = (x, z, a, b) => {
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const l2 = dx * dx + dz * dz || 1;
+      let t = ((x - a.x) * dx + (z - a.z) * dz) / l2;
+      t = Math.max(0, Math.min(1, t));
+      return Math.hypot(x - (a.x + t * dx), z - (a.z + t * dz));
+    };
+    return (x, z) => {
+      // procedural ponds
+      for (const w of world.waters || []) {
+        if (Math.hypot(x - w.x, z - w.z) < w.r) return true;
+      }
+      // OSM water polygons
+      for (const pts of waterPolys) {
+        if (inPoly(x, z, pts)) return true;
+      }
+      // OSM rivers (within half-width + 2m)
+      for (const w of world.waterWays || []) {
+        for (let i = 0; i < w.pts.length - 1; i++) {
+          if (distToSeg(x, z, w.pts[i], w.pts[i + 1]) < w.w / 2 + 2) return true;
+        }
+      }
+      return false;
+    };
+  })();
   {
     const spots = [], rng = world.rng;
     const step = 17, jitter = 7;
@@ -493,6 +538,7 @@ function buildWorld(seed, worldOverride) {
         const x = gx * step + (rng() * 2 - 1) * jitter;
         const z = gz * step + (rng() * 2 - 1) * jitter;
         if (x < 16 || x > SIZE - 16 || z < 16 || z > SIZE - 16) continue;
+        if (isWater(x, z)) continue; // no trees in water
         if (rng() < world.forestDensity(x, z) * 1.6) {
           // height 9..30 m, skewed toward larger trees
           const hgt = 9 + 21 * Math.pow(rng(), 0.6);
