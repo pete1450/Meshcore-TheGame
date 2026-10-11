@@ -454,7 +454,7 @@ function buildWorld(seed, worldOverride) {
     const hairColors = [0x2a1a0a, 0x4a2a0a, 0x1a1a1a, 0x6a4a2a, 0x8a8a8a];
     const hair = new THREE.Mesh(new THREE.SphereGeometry(0.375, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
       new THREE.MeshLambertMaterial({ color: hairColors[(prng() * hairColors.length) | 0] }));
-    hair.position.y = 1.66;
+    hair.position.y = 1.78;
     g.add(hair);
     // random yaw so they don't all face the same way
     g.rotation.y = prng() * Math.PI * 2;
