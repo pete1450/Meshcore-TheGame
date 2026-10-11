@@ -406,6 +406,47 @@ function generateMap(seed) {
   for (const t of towns) t.elev = sampleH(raw, GRID, SIZE, t.x, t.z);
   flattenTowns();
 
+  // Slope limit: no steeper than 45° (1m vertical per 1m horizontal).
+  // Applied to natural terrain before road/towns; keeps peaks, rounds cliffs.
+  {
+    const cell = SIZE / (GRID - 1);
+    const maxD = cell * 1.0; // tan(45°) = 1
+    for (let pass = 0; pass < 300; pass++) {
+      let changed = false;
+      for (let iz = 0; iz < GRID; iz++) {
+        for (let ix = 0; ix < GRID; ix++) {
+          const i = iz * GRID + ix;
+          if (ix > 0) {
+            const d = raw[i] - raw[i - 1];
+            if (d > maxD) { raw[i] = raw[i - 1] + maxD; changed = true; }
+            else if (d < -maxD) { raw[i] = raw[i - 1] - maxD; changed = true; }
+          }
+          if (iz > 0) {
+            const d = raw[i] - raw[i - GRID];
+            if (d > maxD) { raw[i] = raw[i - GRID] + maxD; changed = true; }
+            else if (d < -maxD) { raw[i] = raw[i - GRID] - maxD; changed = true; }
+          }
+        }
+      }
+      for (let iz = GRID - 1; iz >= 0; iz--) {
+        for (let ix = GRID - 1; ix >= 0; ix--) {
+          const i = iz * GRID + ix;
+          if (ix < GRID - 1) {
+            const d = raw[i] - raw[i + 1];
+            if (d > maxD) { raw[i] = raw[i + 1] + maxD; changed = true; }
+            else if (d < -maxD) { raw[i] = raw[i + 1] - maxD; changed = true; }
+          }
+          if (iz < GRID - 1) {
+            const d = raw[i] - raw[i + GRID];
+            if (d > maxD) { raw[i] = raw[i + GRID] + maxD; changed = true; }
+            else if (d < -maxD) { raw[i] = raw[i + GRID] - maxD; changed = true; }
+          }
+        }
+      }
+      if (!changed) break;
+    }
+  }
+
   // Single road through both towns, single-valued in x, with a gentle wiggle.
   const [t1, t2] = towns;
   const townDist = (x, z) => Math.min(...towns.map(t => Math.hypot(x - t.x, z - t.z)));
