@@ -152,8 +152,8 @@ ok(new Set(people.map(p => p.hash)).size === people.length, 'hashes unique');
   ok(s > 0.5, `short LOS link strong (${s.toFixed(3)})`);
   const self = L.linkStrength(flat, SIG.GRID, SIG.SIZE, trees, 1500, 1500, 10, 1500, 1500, 10);
   ok(self === 1, 'zero distance = 1');
-  const far = L.linkStrength(flat, SIG.GRID, SIG.SIZE, trees, 100, 100, 10, 3100, 3100, 10);
-  ok(far === 0, 'beyond MAX_RANGE = 0');
+  const far = L.linkStrength(flat, SIG.GRID, SIG.SIZE, trees, 100, 100, 10, 5100, 5100, 10);
+  ok(far === 0, 'beyond LINK_RANGE = 0');
   // ridge between the two ends kills the link
   const h = new Float32Array(SIG.GRID * SIG.GRID).fill(100);
   for (let iz = 0; iz < SIG.GRID; iz++) for (let ix = 0; ix < SIG.GRID; ix++) {

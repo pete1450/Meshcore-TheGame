@@ -8,7 +8,8 @@ const SIG = {
   SIZE: 4828,          // world extent (m) — 3x3 miles
   GRID: 256,           // heightfield resolution (logic)
   TREE_GRID: 128,      // tree-count grid used for foliage attenuation
-  MAX_RANGE: 1300,     // sweep stops here (m)
+  MAX_RANGE: 1300,     // sweep range for map scans (m)
+  LINK_RANGE: 5000,    // max range for person/repeater links (m) — full map width
   RAY_STEP: 4,         // march step along each ray (m)
   RAY_COUNT: 720,      // 0.5-degree rays
   RX_H: 1.7,           // receiver height above ground (head/handheld, m)
@@ -510,11 +511,11 @@ function sweepCoverage(heights, treeGrid, tx, tz, antH) {
 // ah/bh are heights ABOVE GROUND at each end. Used for repeater discovery
 // and the simulated message flood.
 function linkStrength(h, grid, size, treeGrid, ax, az, ah, bx, bz, bh) {
-  const { DECAY, TREE_K, CANOPY_H, NLOS_DEPTH, MAX_RANGE, LINK_NLOS } = SIG;
+  const { DECAY, TREE_K, CANOPY_H, NLOS_DEPTH, LINK_RANGE, LINK_NLOS } = SIG;
   const dx = bx - ax, dz = bz - az;
   const dist = Math.hypot(dx, dz);
   if (dist < 1) return 1;
-  if (dist > MAX_RANGE) return 0;
+  if (dist > LINK_RANGE) return 0;
   const hA = sampleH(h, grid, size, ax, az) + ah;
   const hB = sampleH(h, grid, size, bx, bz) + bh;
   let slopeMax = -Infinity, atten = 1;
