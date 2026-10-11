@@ -354,10 +354,32 @@ function placeBuildings(world, count) {
       });
     }
     // workshop: walk-in building with workbench, near town center facing road
-    const wx = t.x + 30;
-    const wz = roadZ(wx) + 18;
+    // find a spot that doesn't intersect existing buildings
+    const WW = 12, WD = 10;
+    let wx = t.x + 30, wz = roadZ(wx) + 18;
+    const intersects = (x, z) => {
+      for (const b of out) {
+        // AABB overlap (buildings have small rotation, use expanded bounds)
+        const bx1 = b.x - b.w / 2 - WW / 2 - 2, bx2 = b.x + b.w / 2 + WW / 2 + 2;
+        const bz1 = b.z - b.d / 2 - WD / 2 - 2, bz2 = b.z + b.d / 2 + WD / 2 + 2;
+        if (x > bx1 && x < bx2 && z > bz1 && z < bz2) return true;
+      }
+      return false;
+    };
+    if (intersects(wx, wz)) {
+      // spiral out to find a clear spot
+      let found = false;
+      for (let r = 20; r < 120 && !found; r += 10) {
+        for (let a = 0; a < 12 && !found; a++) {
+          const ang = a / 12 * Math.PI * 2;
+          const tx = t.x + Math.cos(ang) * r;
+          const tz = t.z + Math.sin(ang) * r;
+          if (!intersects(tx, tz)) { wx = tx; wz = tz; found = true; }
+        }
+      }
+    }
     out.push({
-      x: wx, z: wz, w: 12, d: 10, hgt: 4,
+      x: wx, z: wz, w: WW, d: WD, hgt: 4,
       rot: 0, type: 'workshop',
     });
   }
