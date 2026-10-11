@@ -1492,7 +1492,7 @@ async function pkGenerate() {
 /* ================= parts store ================= */
 const STORE = {
   'Boards': [
-    { id: 'rak-mini', name: 'RAK mini', desc: 'nRF52 LoRa board, compact', price: 29 },
+    { id: 'rak-mini', name: 'RAK mini', desc: 'RAK19003 base + RAK4631 core', price: 29 },
   ],
   'Batteries': [],
   'Antennas': [],
@@ -1567,47 +1567,67 @@ function buyPart(item) {
 function makePartModel(partId) {
   const g = new THREE.Group();
   if (partId === 'rak-mini') {
-    // RAK mini LoRa board: small green PCB with chips
-    const pcb = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.02, 0.24),
-      new THREE.MeshLambertMaterial({ color: 0x1a6b2e }));
+    // RAK19003 WisBlock base + RAK4631 core (from reference image)
+    // Black PCB, portrait orientation
+    const pcb = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, 0.34),
+      new THREE.MeshLambertMaterial({ color: 0x0a0a0a }));
     pcb.position.y = 0.01;
     g.add(pcb);
-    // main MCU chip
-    const mcu = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.08),
-      new THREE.MeshLambertMaterial({ color: 0x111111 }));
-    mcu.position.set(-0.06, 0.03, 0);
-    g.add(mcu);
-    // LoRa radio chip
-    const radio = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.015, 0.06),
-      new THREE.MeshLambertMaterial({ color: 0x222222 }));
-    radio.position.set(0.06, 0.028, -0.04);
-    g.add(radio);
-    // antenna connector (gold)
-    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.03, 12),
-      new THREE.MeshLambertMaterial({ color: 0xd4af37 }));
-    ant.position.set(0.12, 0.035, 0.08);
-    g.add(ant);
-    // USB-C port
-    const usb = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.03),
-      new THREE.MeshLambertMaterial({ color: 0x888888 }));
-    usb.position.set(0, 0.03, 0.11);
+    // RAK4631 core module: large white/silver shield in center
+    const core = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.025, 0.16),
+      new THREE.MeshLambertMaterial({ color: 0xd8d8d8 }));
+    core.position.set(0, 0.032, 0.01);
+    g.add(core);
+    // RAK logo mark on the module (dark square)
+    const logo = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.006, 0.04),
+      new THREE.MeshLambertMaterial({ color: 0x333333 }));
+    logo.position.set(-0.03, 0.047, -0.03);
+    g.add(logo);
+    // USB-C connector at top edge (silver)
+    const usb = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.025, 0.035),
+      new THREE.MeshLambertMaterial({ color: 0xb0b0b0 }));
+    usb.position.set(0.03, 0.032, -0.155);
     g.add(usb);
-    // pin headers (two rows)
-    for (const sz of [-0.09, 0.09]) {
-      for (let i = 0; i < 6; i++) {
-        const pin = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.025, 0.015),
-          new THREE.MeshLambertMaterial({ color: 0xd4af37 }));
-        pin.position.set(-0.11 + i * 0.044, 0.032, sz);
+    // White JST connectors (top-left 2-pin, top-right 3-pin)
+    const jstMat = new THREE.MeshLambertMaterial({ color: 0xf0f0f0 });
+    const jst1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.025, 0.03), jstMat);
+    jst1.position.set(-0.07, 0.032, -0.14);
+    g.add(jst1);
+    const jst2 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.03), jstMat);
+    jst2.position.set(0.085, 0.032, -0.135);
+    g.add(jst2);
+    // 4 large gold mounting holes at corners
+    const goldMat = new THREE.MeshLambertMaterial({ color: 0xd4af37 });
+    for (const [hx, hz] of [[-0.095, -0.145], [0.095, -0.145], [-0.095, 0.145], [0.095, 0.145]]) {
+      const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.024, 12), goldMat);
+      hole.position.set(hx, 0.022, hz);
+      g.add(hole);
+      const holeInner = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.026, 8),
+        new THREE.MeshLambertMaterial({ color: 0x000000 }));
+      holeInner.position.set(hx, 0.022, hz);
+      g.add(holeInner);
+    }
+    // Gold pin headers along left and right edges
+    for (const sx of [-0.105, 0.105]) {
+      for (let i = 0; i < 8; i++) {
+        const pin = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.02, 0.012), goldMat);
+        pin.position.set(sx, 0.03, -0.1 + i * 0.028);
         g.add(pin);
       }
     }
-    // small passives
-    for (let i = 0; i < 4; i++) {
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 0.012),
-        new THREE.MeshLambertMaterial({ color: 0x8a6a3a }));
-      cap.position.set(-0.1 + i * 0.05, 0.026, 0.04);
-      g.add(cap);
+    // Small SMD components (resistors/caps)
+    const smdMat = new THREE.MeshLambertMaterial({ color: 0x4a3a2a });
+    const positions = [[-0.05, 0.09], [0.05, 0.09], [-0.05, -0.08], [0.06, 0.06], [-0.06, -0.04]];
+    for (const [px, pz] of positions) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.01, 0.01), smdMat);
+      c.position.set(px, 0.025, pz);
+      g.add(c);
     }
+    // Small green LED
+    const led = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.012, 0.015),
+      new THREE.MeshLambertMaterial({ color: 0x00aa00, emissive: 0x003300 }));
+    led.position.set(0.04, 0.026, 0.1);
+    g.add(led);
   }
   return g;
 }
