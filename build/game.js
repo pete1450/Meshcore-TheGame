@@ -348,10 +348,17 @@ function buildWorld(seed, worldOverride) {
     }
   }
   // OSM water (real terrain): lakes/polygons + rivers/ways
-  if (world.waterPolys || world.waterWays) {
+  if (world.waterPolys || world.waterWays || world.waterLevel !== undefined) {
     const osmWaterMat = new THREE.MeshLambertMaterial({
       color: 0x2a6ab0, transparent: true, opacity: 0.8,
     });
+    // large water body (e.g., Great Lake): single plane at water level
+    if (world.waterLevel !== undefined) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(SIG.SIZE, SIG.SIZE), osmWaterMat);
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(SIG.SIZE / 2, world.waterLevel, SIG.SIZE / 2);
+      worldGroup.add(m);
+    }
     for (const poly of world.waterPolys || []) {
       if (poly.pts.length < 3) continue;
       // centroid for local coords
@@ -1521,6 +1528,9 @@ async function pkFetchRoads(lat, lon, onProgress) {
     const waterPolys = []; // {pts} for natural=water
     const waterWays = [];  // {pts, w} for waterway=*
     const wayEls = doc.getElementsByTagName('way');
+    // index ways by id for relation member lookup
+    const wayById = {};
+    for (const w of wayEls) wayById[w.getAttribute('id')] = w;
     dbg.step = 'ways'; dbg.wayCount = wayEls.length;
     let hwyWays = 0;
     for (const w of wayEls) {
@@ -1552,6 +1562,61 @@ async function pkFetchRoads(lat, lon, onProgress) {
       } else if (waterway && /^(river|stream|canal)$/.test(waterway) && pts.length >= 2) {
         const w = waterway === 'river' ? 8 : waterway === 'canal' ? 6 : 3;
         waterWays.push({ pts, w });
+      }
+    }
+    // relations: multipolygon natural=water (lakes, ponds)
+    const ptsFromWay = (wayEl) => {
+      const pts = [];
+      for (const nd of wayEl.getElementsByTagName('nd')) {
+        const n = nodes[nd.getAttribute('ref')];
+        if (!n) continue;
+        pts.push({
+          x: (n.lon - lon) * mPerDegLon + SIZE_M / 2,
+          z: (lat - n.lat) * mPerDegLat + SIZE_M / 2,
+        });
+      }
+      return pts;
+    };
+    for (const r of doc.getElementsByTagName('relation')) {
+      let isWater = false, isMp = false;
+      for (const t of r.getElementsByTagName('tag')) {
+        const k = t.getAttribute('k'), v = t.getAttribute('v');
+        if (k === 'natural' && v === 'water') isWater = true;
+        if (k === 'type' && v === 'multipolygon') isMp = true;
+      }
+      if (!isWater || !isMp) continue;
+      // collect outer way pts
+      const outers = [];
+      for (const m of r.getElementsByTagName('member')) {
+        if (m.getAttribute('type') !== 'way' || m.getAttribute('role') !== 'outer') continue;
+        const wayEl = wayById[m.getAttribute('ref')];
+        if (!wayEl) continue;
+        const pts = ptsFromWay(wayEl);
+        if (pts.length >= 2) outers.push(pts);
+      }
+      if (!outers.length) continue;
+      // try to join into a single ring (simple: concatenate if endpoints match)
+      let ring = outers[0].slice();
+      let changed = true;
+      while (changed && outers.length > 1) {
+        changed = false;
+        for (let i = 1; i < outers.length; i++) {
+          const o = outers[i];
+          const a0 = ring[0], a1 = ring[ring.length - 1];
+          const b0 = o[0], b1 = o[o.length - 1];
+          const eq = (p, q) => Math.hypot(p.x - q.x, p.z - q.z) < 1;
+          if (eq(a1, b0)) { ring = ring.concat(o.slice(1)); outers.splice(i, 1); changed = true; break; }
+          else if (eq(a1, b1)) { ring = ring.concat(o.slice(0, -1).reverse()); outers.splice(i, 1); changed = true; break; }
+          else if (eq(a0, b1)) { ring = o.slice(0, -1).concat(ring); outers.splice(i, 1); changed = true; break; }
+          else if (eq(a0, b0)) { ring = o.slice(1).reverse().concat(ring); outers.splice(i, 1); changed = true; break; }
+        }
+      }
+      // if closed (or nearly), add as polygon
+      if (ring.length >= 3) {
+        const f = ring[0], l = ring[ring.length - 1];
+        if (Math.hypot(f.x - l.x, f.z - l.z) < 50) {
+          waterPolys.push({ pts: ring });
+        }
       }
     }
     dbg.step = 'done'; dbg.hwyWays = hwyWays; dbg.roadCount = roads.length;
