@@ -296,11 +296,54 @@ function generateMap(seed) {
     return 0.06 + 0.14 * detail;                   // sparse woodland
   }
 
-  return { heights: raw, towns, roadZ, townDist, roadDist, forestDensity, forestClass, noise: nz, rng };
+  const world = { heights: raw, towns, roadZ, townDist, roadDist, forestDensity, forestClass, noise: nz, rng };
+  world.waters = findPonds(raw, seed, world);
+  return world;
 }
 
 // Real-terrain map: heights is a Float32Array(GRID*GRID) of real elevations (m).
 // No procedural towns/roads; forest is applied procedurally via noise patches.
+// Find low-lying areas and create ponds. Modifies heights in place.
+// Returns array of {x, z, r, y} water bodies.
+function findPonds(heights, seed, world) {
+  const { SIZE, GRID } = SIG;
+  const rng = mulberry32(seed ^ 0x12345678);
+  const waters = [];
+  const cands = [];
+  for (let i = 0; i < 200; i++) {
+    const x = 200 + rng() * (SIZE - 400);
+    const z = 200 + rng() * (SIZE - 400);
+    if (world.townDist && world.townDist(x, z) < 150) continue;
+    if (world.roadDist && world.roadDist(x, z) < 40) continue;
+    const h = sampleH(heights, GRID, SIZE, x, z);
+    cands.push({ x, z, h });
+  }
+  cands.sort((a, b) => a.h - b.h);
+  for (const c of cands) {
+    if (waters.length >= 5) break;
+    let ok = true;
+    for (const w of waters) {
+      if (Math.hypot(c.x - w.x, c.z - w.z) < 400) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const r = 25 + rng() * 20;
+    const y = c.h + 0.8;
+    for (let iz = 0; iz < GRID; iz++) {
+      for (let ix = 0; ix < GRID; ix++) {
+        const x = (ix / (GRID - 1)) * SIZE, z = (iz / (GRID - 1)) * SIZE;
+        const d = Math.hypot(x - c.x, z - c.z);
+        if (d < r) {
+          const t = 1 - d / r;
+          const i = iz * GRID + ix;
+          heights[i] -= t * t * 2.5;
+        }
+      }
+    }
+    waters.push({ x: c.x, z: c.z, r, y });
+  }
+  return waters;
+}
+
 function generateRealMap(heights, seed, label) {
   const { SIZE, GRID } = SIG;
   const rng = mulberry32(seed);
@@ -331,6 +374,7 @@ function generateRealMap(heights, seed, label) {
     heights: raw, towns: [], roadZ, townDist, roadDist,
     forestDensity, forestClass, noise: nz, rng,
     real: true, label: label || 'real terrain',
+    waters: findPonds(raw, seed, { townDist: () => Infinity, roadDist: () => Infinity }),
   };
 }
 
@@ -389,13 +433,20 @@ function placeBuildings(world, count) {
 
 function placePeople(world, seed) {
   const { SIZE, GRID } = SIG;
-  const { heights, towns, roadZ, roadDist, townDist, rng } = world;
+  const { heights, towns, roadZ, roadDist, townDist, rng, waters } = world;
+  const inWater = (x, z) => {
+    if (!waters) return false;
+    for (const w of waters) if (Math.hypot(x - w.x, z - w.z) < w.r) return true;
+    return false;
+  };
   const out = [];
   // Two folks per town, near the road.
   for (const t of towns) {
     for (let k = 0; k < 2; k++) {
       const x = t.x + (rng() * 2 - 1) * 40;
-      out.push({ x, z: roadZ(x) + (rng() < 0.5 ? -1 : 1) * (14 + rng() * 20), kind: 'town' });
+      const z = roadZ(x) + (rng() < 0.5 ? -1 : 1) * (14 + rng() * 20);
+      if (inWater(x, z)) continue;
+      out.push({ x, z, kind: 'town' });
     }
   }
   // Scattered folks: hollers, ridges, roadsides — the ones who need linking.
@@ -403,6 +454,7 @@ function placePeople(world, seed) {
   while (out.length < 12 && guard++ < 400) {
     const x = 60 + rng() * (SIZE - 120), z = 60 + rng() * (SIZE - 120);
     if (townDist(x, z) < 110) continue;
+    if (inWater(x, z)) continue;
     const e = sampleH(heights, GRID, SIZE, x, z);
     const rd = roadDist(x, z);
     const kind = rd < 25 ? 'roadside' : (e < 150 ? 'holler' : (e > 380 ? 'ridge' : 'woods'));
@@ -557,5 +609,5 @@ function sampleCov(cov, size, grid, x, z) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { SIG, mulberry32, ValueNoise, generateMap, generateRealMap, placeBuildings, placePeople, sampleH, sweepCoverage, sampleCov, linkStrength, nodeHash, smoothstep, clamp01 };
+  module.exports = { SIG, mulberry32, ValueNoise, generateMap, generateRealMap, placeBuildings, placePeople, sampleH, sweepCoverage, sampleCov, linkStrength, nodeHash, smoothstep, clamp01, findPonds };
 }

@@ -329,6 +329,19 @@ function buildWorld(seed, worldOverride) {
     worldGroup.add(ws.group);
   }
 
+  // water ponds
+  if (world.waters) {
+    const waterMat = new THREE.MeshLambertMaterial({
+      color: 0x2a6ab0, transparent: true, opacity: 0.75,
+    });
+    for (const w of world.waters) {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(w.r, 24), waterMat);
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(w.x, w.y, w.z);
+      worldGroup.add(m);
+    }
+  }
+
   // forest: jittered grid placement (scales to the big map), fills tree-count grid.
   // Trunks + canopies, up to 3x taller than before, sizes skewed toward large.
   const treeGrid = new Uint8Array(SIG.TREE_GRID * SIG.TREE_GRID);
