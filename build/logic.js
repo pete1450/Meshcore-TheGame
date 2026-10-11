@@ -353,6 +353,13 @@ function placeBuildings(world, count) {
         type,
       });
     }
+    // workshop: walk-in building with workbench, near town center facing road
+    const wx = t.x + 30;
+    const wz = roadZ(wx) + 18;
+    out.push({
+      x: wx, z: wz, w: 12, d: 10, hgt: 4,
+      rot: 0, type: 'workshop',
+    });
   }
   return out;
 }

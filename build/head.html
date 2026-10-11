@@ -81,6 +81,21 @@
   #menudlg .pk-card{gap:12px;}
   .pk-check{display:flex;align-items:center;gap:8px;font-size:14px;color:#c8d4e0;cursor:pointer;}
   .pk-check input{width:18px;height:18px;accent-color:#ffd75e;}
+  #storedlg{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:rgba(6,9,14,.72);}
+  #storedlg.hidden{display:none;}
+  .store-card{width:min(640px,94vw);}
+  #store-cats{display:flex;gap:6px;flex-wrap:wrap;}
+  #store-cats button{padding:8px 12px;font-size:13px;}
+  #store-cats button.active{background:#ffd75e;color:#141a23;border-color:#ffd75e;}
+  #store-items{display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow:auto;}
+  .store-item{display:flex;align-items:center;gap:12px;background:#0d1219;border:1px solid #2a3340;
+    border-radius:8px;padding:10px 12px;}
+  .store-item .nm{flex:1;}
+  .store-item .nm b{display:block;color:#fff;font-size:14px;}
+  .store-item .nm span{font-size:12px;color:#9fb0c3;}
+  .store-item .price{color:#ffd75e;font-weight:700;font-size:14px;}
+  .store-item button{padding:8px 16px;font-size:13px;}
   #minimap .tag{position:absolute;top:4px;left:8px;font-size:11px;letter-spacing:.1em;color:#9fb0c3;
     background:rgba(12,16,22,.7);padding:2px 6px;border-radius:4px;}
   /* help overlay */
@@ -213,6 +228,14 @@
     <button id="m-newmap">new map</button>
     <button id="m-realmap">real terrain</button>
     <button id="m-close" class="ghost">close</button>
+  </div>
+</div>
+<div id="storedlg" class="hidden">
+  <div class="pk-card store-card">
+    <h3>PARTS STORE</h3>
+    <div id="store-cats"></div>
+    <div id="store-items"></div>
+    <button id="store-close" class="ghost">close</button>
   </div>
 </div>
 <div class="panel" id="ctl">

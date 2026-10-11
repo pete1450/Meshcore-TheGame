@@ -81,6 +81,21 @@
   #menudlg .pk-card{gap:12px;}
   .pk-check{display:flex;align-items:center;gap:8px;font-size:14px;color:#c8d4e0;cursor:pointer;}
   .pk-check input{width:18px;height:18px;accent-color:#ffd75e;}
+  #storedlg{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:rgba(6,9,14,.72);}
+  #storedlg.hidden{display:none;}
+  .store-card{width:min(640px,94vw);}
+  #store-cats{display:flex;gap:6px;flex-wrap:wrap;}
+  #store-cats button{padding:8px 12px;font-size:13px;}
+  #store-cats button.active{background:#ffd75e;color:#141a23;border-color:#ffd75e;}
+  #store-items{display:flex;flex-direction:column;gap:8px;max-height:40vh;overflow:auto;}
+  .store-item{display:flex;align-items:center;gap:12px;background:#0d1219;border:1px solid #2a3340;
+    border-radius:8px;padding:10px 12px;}
+  .store-item .nm{flex:1;}
+  .store-item .nm b{display:block;color:#fff;font-size:14px;}
+  .store-item .nm span{font-size:12px;color:#9fb0c3;}
+  .store-item .price{color:#ffd75e;font-weight:700;font-size:14px;}
+  .store-item button{padding:8px 16px;font-size:13px;}
   #minimap .tag{position:absolute;top:4px;left:8px;font-size:11px;letter-spacing:.1em;color:#9fb0c3;
     background:rgba(12,16,22,.7);padding:2px 6px;border-radius:4px;}
   /* help overlay */
@@ -213,6 +228,14 @@
     <button id="m-newmap">new map</button>
     <button id="m-realmap">real terrain</button>
     <button id="m-close" class="ghost">close</button>
+  </div>
+</div>
+<div id="storedlg" class="hidden">
+  <div class="pk-card store-card">
+    <h3>PARTS STORE</h3>
+    <div id="store-cats"></div>
+    <div id="store-items"></div>
+    <button id="store-close" class="ghost">close</button>
   </div>
 </div>
 <div class="panel" id="ctl">
@@ -613,6 +636,13 @@ function placeBuildings(world, count) {
         type,
       });
     }
+    // workshop: walk-in building with workbench, near town center facing road
+    const wx = t.x + 30;
+    const wz = roadZ(wx) + 18;
+    out.push({
+      x: wx, z: wz, w: 12, d: 10, hgt: 4,
+      rot: 0, type: 'workshop',
+    });
   }
   return out;
 }
@@ -891,6 +921,102 @@ function disposeGroup(g) {
 }
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
+// Workshop: walk-in building with workbench, computer, and part boxes.
+// Returns { group, walls, bench, computer, boxes }.
+function buildWorkshop(b, H) {
+  const { SIZE, GRID } = SIG;
+  const gy = sampleH(H, GRID, SIZE, b.x, b.z);
+  const group = new THREE.Group();
+  const walls = []; // {x1,z1,x2,z2} AABBs for collision
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0x8a6f4d });
+  const trimMat = new THREE.MeshLambertMaterial({ color: 0x5a4632 });
+  
+  const W2 = 6, D2 = 5, HT = 4, TH = 0.3; // half-width, half-depth, height, thickness
+  const cx = b.x, cz = b.z;
+  
+  function addWall(x1, z1, x2, z2) {
+    const w = Math.abs(x2 - x1) || TH, d = Math.abs(z2 - z1) || TH;
+    const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(Math.max(w, TH), HT, Math.max(d, TH)), wallMat);
+    m.position.set(mx, gy + HT / 2, mz);
+    group.add(m);
+    walls.push({ x1: Math.min(x1, x2) - TH/2, z1: Math.min(z1, z2) - TH/2,
+                 x2: Math.max(x1, x2) + TH/2, z2: Math.max(z1, z2) + TH/2 });
+  }
+  
+  // back wall (+z)
+  addWall(cx - W2, cz + D2, cx + W2, cz + D2);
+  // front wall (-z) with 2m door gap in center
+  addWall(cx - W2, cz - D2, cx - 1, cz - D2);
+  addWall(cx + 1, cz - D2, cx + W2, cz - D2);
+  // side walls
+  addWall(cx - W2, cz - D2, cx - W2, cz + D2);
+  addWall(cx + W2, cz - D2, cx + W2, cz + D2);
+  
+  // roof
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(W2*2 + 1, 0.3, D2*2 + 1), trimMat);
+  roof.position.set(cx, gy + HT + 0.15, cz);
+  group.add(roof);
+  
+  // floor
+  const floor = new THREE.Mesh(new THREE.BoxGeometry(W2*2, 0.1, D2*2),
+    new THREE.MeshLambertMaterial({ color: 0x6b5b45 }));
+  floor.position.set(cx, gy + 0.05, cz);
+  group.add(floor);
+  
+  // workbench: against back wall
+  const bench = new THREE.Group();
+  const bTop = new THREE.Mesh(new THREE.BoxGeometry(4, 0.15, 1.2),
+    new THREE.MeshLambertMaterial({ color: 0x7a5c3e }));
+  bTop.position.set(cx, gy + 1.0, cz + 3.5);
+  bench.add(bTop);
+  for (const sx of [-1.8, 1.8]) for (const sz of [-0.5, 0.5]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.0, 0.12), trimMat);
+    leg.position.set(cx + sx, gy + 0.5, cz + 3.5 + sz);
+    bench.add(leg);
+  }
+  group.add(bench);
+  
+  // computer: monitor on bench, screen faces -z (into room)
+  const comp = new THREE.Group();
+  const stand = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.3, 0.15), trimMat);
+  stand.position.set(cx - 1.2, gy + 1.2, cz + 3.5);
+  comp.add(stand);
+  const monitor = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.45, 0.08),
+    new THREE.MeshLambertMaterial({ color: 0x222222 }));
+  monitor.position.set(cx - 1.2, gy + 1.55, cz + 3.5);
+  monitor.userData.isComputer = true;
+  comp.add(monitor);
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.35),
+    new THREE.MeshBasicMaterial({ color: 0x1a3a5a }));
+  screen.position.set(cx - 1.2, gy + 1.55, cz + 3.5 - 0.045);
+  screen.rotation.y = Math.PI; // face -z
+  screen.userData.isComputer = true;
+  comp.add(screen);
+  // keyboard
+  const kb = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.2),
+    new THREE.MeshLambertMaterial({ color: 0x333333 }));
+  kb.position.set(cx - 1.2, gy + 1.1, cz + 3.0);
+  comp.add(kb);
+  group.add(comp);
+  
+  // 10 box slots on bench (5x2 grid)
+  const boxes = []; // {slot, mesh, part}
+  const slotX0 = cx + 0.2, slotZ0 = cz + 3.2;
+  for (let i = 0; i < 10; i++) {
+    const sx = slotX0 + (i % 5) * 0.65;
+    const sz = slotZ0 + Math.floor(i / 5) * 0.65;
+    boxes.push({ slot: i, x: sx, z: sz, y: gy + 1.15, mesh: null, part: null });
+  }
+  
+  // interior light
+  const light = new THREE.PointLight(0xffe0b0, 1.2, 20);
+  light.position.set(cx, gy + 3.2, cz);
+  group.add(light);
+  
+  return { group, walls, benchPos: { x: cx, z: cz + 3.5, y: gy + 1.0 }, computer: comp, boxes, cx, cz, gy };
+}
+
 function buildWorld(seed, worldOverride) {
   W.seed = seed;
   if (worldGroup) { scene.remove(worldGroup); disposeGroup(worldGroup); }
@@ -997,7 +1123,7 @@ function buildWorld(seed, worldOverride) {
   W.buildings = placeBuildings(world, 16);
   {
     const byType = { house: [], barn: [], store: [] };
-    W.buildings.forEach(b => byType[b.type].push(b));
+    W.buildings.forEach(b => { if (b.type !== 'workshop') byType[b.type].push(b); });
     const colors = { house: 0xb08968, barn: 0x8f3b2f, store: 0x9aa0a8 };
     const dummy = new THREE.Object3D();
     for (const t of Object.keys(byType)) {
@@ -1014,6 +1140,15 @@ function buildWorld(seed, worldOverride) {
       im.instanceMatrix.needsUpdate = true;
       worldGroup.add(im);
     }
+  }
+
+  // workshops: walk-in buildings with workbench + computer
+  W.workshops = [];
+  for (const b of W.buildings) {
+    if (b.type !== 'workshop') continue;
+    const ws = buildWorkshop(b, H);
+    W.workshops.push(ws);
+    worldGroup.add(ws.group);
   }
 
   // forest: jittered grid placement (scales to the big map), fills tree-count grid.
@@ -1194,6 +1329,20 @@ function repeaterFromTap(cx, cy) {
   let g = hits[0].object;
   while (g && !g.userData.rep) g = g.parent;
   return g ? g.userData.rep : null;
+}
+function workshopFromTap(cx, cy) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const nx = ((cx - rect.left) / rect.width) * 2 - 1;
+  const ny = -((cy - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera({ x: nx, y: ny }, camera);
+  const targets = [];
+  for (const ws of W.workshops || []) targets.push(ws.group);
+  const hits = raycaster.intersectObjects(targets, true);
+  if (!hits.length) return null;
+  const o = hits[0].object;
+  if (o.userData.isComputer) return { type: 'computer' };
+  if (o.userData.boxSlot) return { type: 'box', slot: o.userData.boxSlot, workshop: o.userData.workshop };
+  return null;
 }
 
 // Animated radar reveal. Merges into covAcc (or preview layer), painting
@@ -1612,6 +1761,9 @@ function wireUI() {
     document.getElementById('pickdlg').classList.remove('hidden');
     pkRender();
   };
+  document.getElementById('store-close').onclick = () => {
+    document.getElementById('storedlg').classList.add('hidden');
+  };
   pkInit();
   mapEl.addEventListener('click', (e) => {
     if (mapEl.classList.contains('expanded')) setWaypointFromEvent(e);
@@ -1627,14 +1779,34 @@ function wireUI() {
     if (document.pointerLockElement) {
       // looking at a repeater (crosshair)? open its menu
       const rep = repeaterFromTap(innerWidth / 2, innerHeight / 2);
-      if (rep) showRepMenu(rep);
+      if (rep) { showRepMenu(rep); return; }
+      const ws = workshopFromTap(innerWidth / 2, innerHeight / 2);
+      if (ws) { handleWorkshopTap(ws); return; }
       return;
     }
+    // workshop taps work on touch too
+    const wsTap = workshopFromTap(e.clientX, e.clientY);
+    if (wsTap) { handleWorkshopTap(wsTap); return; }
     if (IS_TOUCH) return;
     const rep = repeaterFromTap(e.clientX, e.clientY);
     if (rep) { showRepMenu(rep); return; }
     lockPointer();
   });
+}
+function handleWorkshopTap(ws) {
+  if (ws.type === 'computer') openStore();
+  else if (ws.type === 'box') unboxPart(ws.workshop, ws.slot);
+}
+function unboxPart(workshop, slot) {
+  if (!slot.mesh || slot.part) return;
+  // remove box, add part model
+  workshop.group.remove(slot.mesh);
+  slot.mesh = null;
+  const part = makePartModel(slot.partId);
+  part.position.set(slot.x, slot.y, slot.z);
+  workshop.group.add(part);
+  slot.part = part;
+  showToast(slot.partName + ' unboxed');
 }
 function hideHelp() { helpEl.classList.add('hidden'); }
 let toastTimer = 0;
@@ -1758,14 +1930,31 @@ function stepPlayer(dt) {
   }
   P.x = clamp(P.x, 16, SIZE - 16);
   P.z = clamp(P.z, 16, SIZE - 16);
-  // building collision: push out of footprints
+  // building collision: push out of footprints (workshops use wall collision instead)
   for (const b of W.buildings) {
+    if (b.type === 'workshop') continue;
     const dx = P.x - b.x, dz = P.z - b.z;
     const r = 0.5 * Math.hypot(b.w, b.d) * 0.8 + 1.4;
     const d2 = dx * dx + dz * dz;
     if (d2 < r * r && d2 > 1e-6) {
       const d = Math.sqrt(d2);
       P.x = b.x + dx / d * r; P.z = b.z + dz / d * r;
+    }
+  }
+  // workshop walls: AABB push-out (door gap lets you walk in)
+  if (W.workshops) for (const ws of W.workshops) {
+    for (const wl of ws.walls) {
+      const pr = 0.5; // player radius
+      if (P.x > wl.x1 - pr && P.x < wl.x2 + pr && P.z > wl.z1 - pr && P.z < wl.z2 + pr) {
+        // push out along smallest penetration
+        const dx1 = P.x - (wl.x1 - pr), dx2 = (wl.x2 + pr) - P.x;
+        const dz1 = P.z - (wl.z1 - pr), dz2 = (wl.z2 + pr) - P.z;
+        const m = Math.min(dx1, dx2, dz1, dz2);
+        if (m === dx1) P.x = wl.x1 - pr;
+        else if (m === dx2) P.x = wl.x2 + pr;
+        else if (m === dz1) P.z = wl.z1 - pr;
+        else P.z = wl.z2 + pr;
+      }
     }
   }
   const gy = sampleH(W.world.heights, GRID, SIZE, P.x, P.z) + 1.7;
@@ -2120,6 +2309,129 @@ async function pkGenerate() {
     pkStatus('failed: ' + e.message);
   }
   btn.disabled = false;
+}
+
+/* ================= parts store ================= */
+const STORE = {
+  'Boards': [
+    { id: 'rak-mini', name: 'RAK mini', desc: 'nRF52 LoRa board, compact', price: 29 },
+  ],
+  'Batteries': [],
+  'Antennas': [],
+  'Cases': [],
+  'Solar Panels': [],
+  'Enclosures': [],
+};
+let storeCat = 'Boards';
+function renderStore() {
+  const cats = document.getElementById('store-cats');
+  cats.innerHTML = '';
+  for (const c of Object.keys(STORE)) {
+    const b = document.createElement('button');
+    b.textContent = c + (STORE[c].length ? ` (${STORE[c].length})` : '');
+    if (c === storeCat) b.classList.add('active');
+    b.onclick = () => { storeCat = c; renderStore(); };
+    cats.appendChild(b);
+  }
+  const items = document.getElementById('store-items');
+  items.innerHTML = '';
+  for (const it of STORE[storeCat]) {
+    const d = document.createElement('div');
+    d.className = 'store-item';
+    d.innerHTML = `<div class="nm"><b>${it.name}</b><span>${it.desc}</span></div>
+      <div class="price">$${it.price}</div>`;
+    const buy = document.createElement('button');
+    buy.textContent = 'buy';
+    buy.onclick = () => buyPart(it);
+    d.appendChild(buy);
+    items.appendChild(d);
+  }
+  if (!STORE[storeCat].length) {
+    items.innerHTML = '<div style="color:#9fb0c3;font-size:13px;padding:12px;">No parts yet — check back soon.</div>';
+  }
+}
+function openStore() {
+  document.getElementById('storedlg').classList.remove('hidden');
+  renderStore();
+}
+function buyPart(item) {
+  // find the workshop the player is in (nearest)
+  let best = null, bd = 1e9;
+  for (const ws of W.workshops || []) {
+    const d = Math.hypot(W.player.x - ws.cx, W.player.z - ws.cz);
+    if (d < bd) { bd = d; best = ws; }
+  }
+  if (!best || bd > 20) { showToast('get closer to a workbench'); return; }
+  const slot = best.boxes.find(b => !b.mesh && !b.part);
+  if (!slot) { showToast('bench is full (10 boxes)'); return; }
+  // create cardboard box
+  const g = new THREE.Group();
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.5),
+    new THREE.MeshLambertMaterial({ color: 0xa0784a }));
+  box.position.y = 0.175;
+  g.add(box);
+  const tape = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.06, 0.12),
+    new THREE.MeshLambertMaterial({ color: 0xd0c0a0 }));
+  tape.position.y = 0.35;
+  g.add(tape);
+  g.position.set(slot.x, slot.y, slot.z);
+  // make tappable
+  g.traverse(o => { o.userData.boxSlot = slot; o.userData.workshop = best; });
+  slot.mesh = g;
+  slot.partId = item.id;
+  slot.partName = item.name;
+  best.group.add(g);
+  document.getElementById('storedlg').classList.add('hidden');
+  showToast(item.name + ' ordered — tap the box to unbox');
+}
+
+/* ================= part models ================= */
+function makePartModel(partId) {
+  const g = new THREE.Group();
+  if (partId === 'rak-mini') {
+    // RAK mini LoRa board: small green PCB with chips
+    const pcb = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.02, 0.24),
+      new THREE.MeshLambertMaterial({ color: 0x1a6b2e }));
+    pcb.position.y = 0.01;
+    g.add(pcb);
+    // main MCU chip
+    const mcu = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.08),
+      new THREE.MeshLambertMaterial({ color: 0x111111 }));
+    mcu.position.set(-0.06, 0.03, 0);
+    g.add(mcu);
+    // LoRa radio chip
+    const radio = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.015, 0.06),
+      new THREE.MeshLambertMaterial({ color: 0x222222 }));
+    radio.position.set(0.06, 0.028, -0.04);
+    g.add(radio);
+    // antenna connector (gold)
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.03, 12),
+      new THREE.MeshLambertMaterial({ color: 0xd4af37 }));
+    ant.position.set(0.12, 0.035, 0.08);
+    g.add(ant);
+    // USB-C port
+    const usb = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.03),
+      new THREE.MeshLambertMaterial({ color: 0x888888 }));
+    usb.position.set(0, 0.03, 0.11);
+    g.add(usb);
+    // pin headers (two rows)
+    for (const sz of [-0.09, 0.09]) {
+      for (let i = 0; i < 6; i++) {
+        const pin = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.025, 0.015),
+          new THREE.MeshLambertMaterial({ color: 0xd4af37 }));
+        pin.position.set(-0.11 + i * 0.044, 0.032, sz);
+        g.add(pin);
+      }
+    }
+    // small passives
+    for (let i = 0; i < 4; i++) {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 0.012),
+        new THREE.MeshLambertMaterial({ color: 0x8a6a3a }));
+      cap.position.set(-0.1 + i * 0.05, 0.026, 0.04);
+      g.add(cap);
+    }
+  }
+  return g;
 }
 
 window.__sig = { W, buildWorld, dropRepeater, runMapScan, toggleMap, showRepMenu, hideRepMenu, deleteRepeater, PK };

@@ -54,8 +54,8 @@ ok(w1.towns[0].name !== w1.towns[1].name, 'town names differ');
 
 // buildings + people
 const blds = L.placeBuildings(w1, 16);
-ok(blds.length === 32, '16 buildings per town');
-ok(blds.every(b => Math.abs(b.z - w1.roadZ(b.x)) > 8), 'buildings off the road');
+ok(blds.length === 34, '16 buildings + workshop per town');
+ok(blds.filter(b => b.type !== 'workshop').every(b => Math.abs(b.z - w1.roadZ(b.x)) > 8), 'buildings off the road');
 const people = L.placePeople(w1, 12345);
 ok(people.length >= 10, `${people.length} people placed`);
 ok(people.filter(p => p.kind === 'town').length === 4, '4 town folk');
