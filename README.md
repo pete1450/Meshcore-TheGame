@@ -5,6 +5,9 @@ procedural mountain map and linking everyone up.
 
 **Play it:** https://pete1450.github.io/Meshcore-TheGame/
 
+<img height="500" alt="image" src="https://github.com/user-attachments/assets/40e8fea0-6420-41c9-8430-79e235058011" />
+
+
 ## The game
 
 You spawn in a trail town on a 3.2 × 3.2 km procedural topo map (0–500 m
